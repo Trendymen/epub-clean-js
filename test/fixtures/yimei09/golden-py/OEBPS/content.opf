@@ -1,0 +1,233 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="BookId" prefix="duokan-page: http://www.duokan.com/duokan-page/">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"
+            xmlns:opf="http://www.idpf.org/2007/opf">
+    <dc:title>义妹生活 09</dc:title>
+    <dc:creator id="creator-aut">三河ごーすと</dc:creator>
+    <meta refines="#creator-aut" property="role" scheme="marc:relators">aut</meta>
+    <dc:creator id="creator-ill">hiten</dc:creator>
+    <meta refines="#creator-ill" property="role" scheme="marc:relators">ill</meta>
+    <dc:language>zh</dc:language>
+    <dc:publisher>MF文库J</dc:publisher>
+    <dc:description><![CDATA[
+我紧紧握住他牵着我的那只手，一点都不想放开。
+在校是「情侣」，在家是「兄妹」。
+悠太与沙季通过磨合找出适当距离，
+但是紧接着就因为父母不在而要度过「完全只有两个人的两天」，
+两人真的能继续维持适当的距离吗……？
+另一方面，学校活动、朋友的青春与加油、与打工新人「后辈小妹」的交流等，
+崭新的风毫不留情地吹向悠太与沙季……？
+「相遇」至今一年，历经许多事而改变的两人，迎来高中生活最后的夏天。
+经历过友情、青春、新的相遇之后，「兄妹」所面对的感情是──
+    ]]></dc:description>
+    <dc:identifier id="BookId">urn:uuid:655d9562-980d-45d3-ae84-9a60560c6e39</dc:identifier>
+    <dc:subject>校园</dc:subject>
+    <dc:subject>青春</dc:subject>
+    <dc:subject>恋爱</dc:subject>
+    <dc:subject>妹妹</dc:subject>
+    <meta property="belongs-to-collection">义妹生活</meta>
+    <meta property="group-position">9</meta>
+    <meta name="cover" content="cover-image"/>
+    <meta property="dcterms:modified">2026-05-22T10:14:36Z</meta>
+  </metadata>
+  <manifest>
+
+    <item id="font_ch1" href="Fonts/ch1.ttf" media-type="font/ttf"/>
+
+    <item id="font_ch2" href="Fonts/ch2.ttf" media-type="font/ttf"/>
+
+    <item id="font_ch3" href="Fonts/ch3.ttf" media-type="font/ttf"/>
+
+    <item id="font_ctt1" href="Fonts/ctt1.ttf" media-type="font/ttf"/>
+
+    <item id="font_ctt2" href="Fonts/ctt2.ttf" media-type="font/ttf"/>
+
+    <item id="font_emoji" href="Fonts/emoji.ttf" media-type="font/ttf"/>
+
+    <item id="font_int" href="Fonts/int.ttf" media-type="font/ttf"/>
+
+    <item id="font_main" href="Fonts/main.ttf" media-type="font/ttf"/>
+
+    <item id="font_mes" href="Fonts/mes.ttf" media-type="font/ttf"/>
+
+    <item id="font_note" href="Fonts/note.ttf" media-type="font/ttf"/>
+
+    <item id="font_sum" href="Fonts/sum.ttf" media-type="font/ttf"/>
+
+    <item id="font_sym" href="Fonts/sym.ttf" media-type="font/ttf"/>
+
+    <item id="cover-image" href="Images/cover.jpg" media-type="image/jpeg" properties="cover-image"/>
+
+    <item id="img_kuchie-001" href="Images/kuchie-001.webp" media-type="image/webp"/>
+
+    <item id="img_kuchie-002" href="Images/kuchie-002.webp" media-type="image/webp"/>
+
+    <item id="img_kuchie-003" href="Images/kuchie-003.webp" media-type="image/webp"/>
+
+    <item id="img_kuchie-004" href="Images/kuchie-004.webp" media-type="image/webp"/>
+
+    <item id="img_kuchie-005" href="Images/kuchie-005.webp" media-type="image/webp"/>
+
+    <item id="img_logo" href="Images/logo.webp" media-type="image/webp"/>
+
+    <item id="img_note" href="Images/note.webp" media-type="image/webp"/>
+
+    <item id="img_note1" href="Images/note1.webp" media-type="image/webp"/>
+
+    <item id="img_p039" href="Images/p039.webp" media-type="image/webp"/>
+
+    <item id="img_p062" href="Images/p062.webp" media-type="image/webp"/>
+
+    <item id="img_p137" href="Images/p137.webp" media-type="image/webp"/>
+
+    <item id="img_p177" href="Images/p177.webp" media-type="image/webp"/>
+
+    <item id="img_p196" href="Images/p196.webp" media-type="image/webp"/>
+
+    <item id="img_p209" href="Images/p209.webp" media-type="image/webp"/>
+
+    <item id="img_p242" href="Images/p242.webp" media-type="image/webp"/>
+
+    <item id="img_p267" href="Images/p267.webp" media-type="image/webp"/>
+
+    <item id="img_p304" href="Images/p304.webp" media-type="image/webp"/>
+
+    <item id="img_p318" href="Images/p318.webp" media-type="image/webp"/>
+
+    <item id="img_t1" href="Images/t1.webp" media-type="image/webp"/>
+
+    <item id="img_t2" href="Images/t2.webp" media-type="image/webp"/>
+
+    <item id="img_t3" href="Images/t3.webp" media-type="image/webp"/>
+
+    <item id="img_t4" href="Images/t4.webp" media-type="image/webp"/>
+
+    <item id="img_toc-001" href="Images/toc-001.webp" media-type="image/webp"/>
+
+    <item id="js_script" href="Misc/script.js" media-type="application/javascript"/>
+
+    <item id="css_default" href="Styles/default.css" media-type="text/css"/>
+
+    <item id="css_necessary" href="Styles/necessary.css" media-type="text/css"/>
+
+    <item id="css_stylesheet" href="Styles/stylesheet.css" media-type="text/css"/>
+
+    <item id="TOC" href="Text/TOC.xhtml" media-type="application/xhtml+xml" properties="scripted"/>
+
+    <item id="chapter0001" href="Text/chapter0001.xhtml" media-type="application/xhtml+xml" properties="scripted"/>
+
+    <item id="chapter0002" href="Text/chapter0002.xhtml" media-type="application/xhtml+xml" properties="scripted"/>
+
+    <item id="chapter0003" href="Text/chapter0003.xhtml" media-type="application/xhtml+xml" properties="scripted"/>
+
+    <item id="chapter0004" href="Text/chapter0004.xhtml" media-type="application/xhtml+xml" properties="scripted"/>
+
+    <item id="chapter0005" href="Text/chapter0005.xhtml" media-type="application/xhtml+xml" properties="scripted"/>
+
+    <item id="chapter0006" href="Text/chapter0006.xhtml" media-type="application/xhtml+xml" properties="scripted"/>
+
+    <item id="chapter0007" href="Text/chapter0007.xhtml" media-type="application/xhtml+xml" properties="scripted"/>
+
+    <item id="chapter0008" href="Text/chapter0008.xhtml" media-type="application/xhtml+xml" properties="scripted"/>
+
+    <item id="chapter0009" href="Text/chapter0009.xhtml" media-type="application/xhtml+xml" properties="scripted"/>
+
+    <item id="chapter0010" href="Text/chapter0010.xhtml" media-type="application/xhtml+xml" properties="scripted"/>
+
+    <item id="chapter0011" href="Text/chapter0011.xhtml" media-type="application/xhtml+xml" properties="scripted"/>
+
+    <item id="chapter0012" href="Text/chapter0012.xhtml" media-type="application/xhtml+xml" properties="scripted"/>
+
+    <item id="contents" href="Text/contents.xhtml" media-type="application/xhtml+xml" properties="scripted"/>
+
+    <item id="cover" href="Text/cover.xhtml" media-type="application/xhtml+xml" properties="scripted"/>
+
+    <item id="illus0001" href="Text/illus0001.xhtml" media-type="application/xhtml+xml" properties="scripted"/>
+
+    <item id="illus0002" href="Text/illus0002.xhtml" media-type="application/xhtml+xml" properties="scripted"/>
+
+    <item id="illus0003" href="Text/illus0003.xhtml" media-type="application/xhtml+xml" properties="scripted"/>
+
+    <item id="illus0004" href="Text/illus0004.xhtml" media-type="application/xhtml+xml" properties="scripted"/>
+
+    <item id="illus0005" href="Text/illus0005.xhtml" media-type="application/xhtml+xml" properties="scripted"/>
+
+    <item id="message" href="Text/message.xhtml" media-type="application/xhtml+xml" properties="scripted"/>
+
+    <item id="nav" href="Text/navigation-documents.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+
+    <item id="pre" href="Text/pre.xhtml" media-type="application/xhtml+xml" properties="scripted"/>
+
+    <item id="special0001" href="Text/special0001.xhtml" media-type="application/xhtml+xml" properties="scripted"/>
+
+    <item id="special0002" href="Text/special0002.xhtml" media-type="application/xhtml+xml" properties="scripted"/>
+
+    <item id="special0003" href="Text/special0003.xhtml" media-type="application/xhtml+xml" properties="scripted"/>
+
+    <item id="summary" href="Text/summary.xhtml" media-type="application/xhtml+xml" properties="scripted"/>
+
+    <item id="title" href="Text/title.xhtml" media-type="application/xhtml+xml" properties="scripted"/>
+
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+
+  </manifest>
+  <spine toc="ncx" page-progression-direction="ltr">
+
+    <itemref idref="cover" properties="duokan-page-fullscreen"/>
+
+    <itemref idref="title"/>
+
+    <itemref idref="message"/>
+
+    <itemref idref="summary"/>
+
+    <itemref idref="illus0001" properties="duokan-page-fitwindow"/>
+
+    <itemref idref="illus0002" properties="duokan-page-fitwindow"/>
+
+    <itemref idref="illus0003" properties="duokan-page-fitwindow"/>
+
+    <itemref idref="illus0004" properties="duokan-page-fitwindow"/>
+
+    <itemref idref="illus0005" properties="duokan-page-fitwindow"/>
+
+    <itemref idref="contents" properties="duokan-page-fitwindow"/>
+
+    <itemref idref="TOC"/>
+
+    <itemref idref="pre"/>
+
+    <itemref idref="chapter0001"/>
+
+    <itemref idref="chapter0002"/>
+
+    <itemref idref="chapter0003"/>
+
+    <itemref idref="chapter0004"/>
+
+    <itemref idref="chapter0005"/>
+
+    <itemref idref="chapter0006"/>
+
+    <itemref idref="chapter0007"/>
+
+    <itemref idref="chapter0008"/>
+
+    <itemref idref="chapter0009"/>
+
+    <itemref idref="chapter0010"/>
+
+    <itemref idref="chapter0011"/>
+
+    <itemref idref="chapter0012"/>
+
+    <itemref idref="special0001"/>
+
+    <itemref idref="special0002"/>
+
+    <itemref idref="special0003"/>
+
+    <itemref idref="nav" linear="no"/>
+
+  </spine>
+</package>

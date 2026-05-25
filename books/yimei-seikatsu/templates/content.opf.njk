@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="BookId" prefix="duokan-page: http://www.duokan.com/duokan-page/">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"
+            xmlns:opf="http://www.idpf.org/2007/opf">
+    <dc:title>{{ title }}</dc:title>
+    <dc:creator id="creator-aut">三河ごーすと</dc:creator>
+    <meta refines="#creator-aut" property="role" scheme="marc:relators">aut</meta>
+    <dc:creator id="creator-ill">hiten</dc:creator>
+    <meta refines="#creator-ill" property="role" scheme="marc:relators">ill</meta>
+    <dc:language>zh</dc:language>
+    <dc:publisher>MF文库J</dc:publisher>
+    <dc:description><![CDATA[
+{{ description }}
+    ]]></dc:description>
+    <dc:identifier id="BookId">urn:uuid:{{ uuid }}</dc:identifier>
+    <dc:subject>校园</dc:subject>
+    <dc:subject>青春</dc:subject>
+    <dc:subject>恋爱</dc:subject>
+    <dc:subject>妹妹</dc:subject>
+    <meta property="belongs-to-collection">义妹生活</meta>
+    <meta property="group-position">9</meta>
+    <meta name="cover" content="cover-image"/>
+    <meta property="dcterms:modified">{{ modifiedIso }}</meta>
+  </metadata>
+  <manifest>
+{% for item in manifestItems %}
+    <item id="{{ item.id }}" href="{{ item.href }}" media-type="{{ item.mediaType }}"{% if item.properties %} properties="{{ item.properties }}"{% endif %}/>
+{% endfor %}
+  </manifest>
+  <spine toc="ncx" page-progression-direction="ltr">
+{% for s in spineItems %}
+    <itemref idref="{{ s.idref }}"{% if s.linear == 'no' %} linear="no"{% endif %}{% if s.properties %} properties="{{ s.properties }}"{% endif %}/>
+{% endfor %}
+  </spine>
+</package>

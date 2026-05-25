@@ -1,0 +1,332 @@
+{
+  "source": "[三河ごーすと].义妹生活.09.[台简].epub (Python 版, 引言修复后)",
+  "generated_at": "2026-05-22T10:08:31.698Z",
+  "files": {
+    "META-INF/com.apple.ibooks.display-options.xml": {
+      "sha256_normalized": "e0203d265e0663af016377911803447c9f5d3ad5d81a0dd0ffc5c79c83723d9e",
+      "bytes": 169
+    },
+    "META-INF/container.xml": {
+      "sha256_normalized": "d5482ea39c0c3bc16f98e0f2ca9e5472c9e6dcec7eefcbd0a54b66c6c6827499",
+      "bytes": 265
+    },
+    "META-INF/zhangyue-expansion.xml": {
+      "sha256_normalized": "506c9b4e6c8312d618ac3dc287c05747185e746422c3dc085c75b903ebcf404f",
+      "bytes": 117
+    },
+    "OEBPS/Fonts/ch1.ttf": {
+      "sha256_normalized": "dc822152d7f26894399e8b6ef724673771b81e6a538e2a092366cda8aef1ccd7",
+      "bytes": 9228
+    },
+    "OEBPS/Fonts/ch2.ttf": {
+      "sha256_normalized": "3d26235ceb9155c72d70f86d394bb1ebb2b2dbd1cd2fd30c391527423835ef4d",
+      "bytes": 8336
+    },
+    "OEBPS/Fonts/ch3.ttf": {
+      "sha256_normalized": "8f8554de7fe42137f039dfe0ff2550cd6c184065f2ac62c6cd4e61d34f658fb5",
+      "bytes": 7248
+    },
+    "OEBPS/Fonts/ctt1.ttf": {
+      "sha256_normalized": "e82c373777dc28b711aa8cd7e6172fc522e50fc95ee3ec04331130f70f20b050",
+      "bytes": 13540
+    },
+    "OEBPS/Fonts/ctt2.ttf": {
+      "sha256_normalized": "5ee4ef56539781aa5a682d679c0027c9436c91a3b5453f56d07586cf86008293",
+      "bytes": 2404
+    },
+    "OEBPS/Fonts/emoji.ttf": {
+      "sha256_normalized": "704fe58a7bfb0803660282ecb00547f6355a420d9041df4ac9c1ad1e7b42ef2d",
+      "bytes": 5312
+    },
+    "OEBPS/Fonts/int.ttf": {
+      "sha256_normalized": "5bd4249146258703c9783346e2b9a9de07b4b1d70a931634f6113bda609d673b",
+      "bytes": 3512
+    },
+    "OEBPS/Fonts/main.ttf": {
+      "sha256_normalized": "37dbe40dbeac6b9dc058615b0f55d4c4ab7f72476d50b2fd38e45be3fb83338d",
+      "bytes": 530288
+    },
+    "OEBPS/Fonts/mes.ttf": {
+      "sha256_normalized": "46525335687ef827f5d76aea49fcd0184b6ce3118e3f9d355f666a46ab60613e",
+      "bytes": 13076
+    },
+    "OEBPS/Fonts/note.ttf": {
+      "sha256_normalized": "15a5974d2b13267e3b9869afcca4bc9975a9fa61ed1a8a3ffa0079c8475a8c7b",
+      "bytes": 16040
+    },
+    "OEBPS/Fonts/sum.ttf": {
+      "sha256_normalized": "0b44845b7b48c244d6e5bc8ac76ec296c664c628d82aa2a44275149b8a5770db",
+      "bytes": 37580
+    },
+    "OEBPS/Fonts/sym.ttf": {
+      "sha256_normalized": "a05b538dba36e10a7e8fcb537b15bd2718a0b98b9d8891bd0d7a9daf5a364458",
+      "bytes": 1448
+    },
+    "OEBPS/Images/cover.jpg": {
+      "sha256_normalized": "f9e3b1d58ec936ff786ca913a54da02ef58ea127ca8cdb2fb3396938d01df544",
+      "bytes": 1413385
+    },
+    "OEBPS/Images/kuchie-001.webp": {
+      "sha256_normalized": "cabc156657a6550f0b6f990c6357e6ca81f0702d8d2b59db5354bf3233cee973",
+      "bytes": 210828
+    },
+    "OEBPS/Images/kuchie-002.webp": {
+      "sha256_normalized": "135dc5f8ef4752f7efe7677c176bea5154c30191c897b32c3804dd5f6b283045",
+      "bytes": 187140
+    },
+    "OEBPS/Images/kuchie-003.webp": {
+      "sha256_normalized": "674f3fbd3ed3fef64f97ea1f7183a0e7cfff852a39645c6a4fd02428d042c0f7",
+      "bytes": 150504
+    },
+    "OEBPS/Images/kuchie-004.webp": {
+      "sha256_normalized": "cddaace65dacb12f31a1864303f3843094608ef4b34129b7c6e6084129b5f6e7",
+      "bytes": 192178
+    },
+    "OEBPS/Images/kuchie-005.webp": {
+      "sha256_normalized": "56dacdbeeb48bdfb8f203b213dab732ff20bf4533ef2146c2ddbd17174f0dd05",
+      "bytes": 209594
+    },
+    "OEBPS/Images/logo.webp": {
+      "sha256_normalized": "20c2a3b8cb7d5c4dec184051024fd95e85a9c93068eabc0e4f07495167f5b6dd",
+      "bytes": 59062
+    },
+    "OEBPS/Images/note.webp": {
+      "sha256_normalized": "fb1f88574d038d437f1b19f7cfa69cdef2acc1fc7a5052f65c6c6e956b637d41",
+      "bytes": 10412
+    },
+    "OEBPS/Images/note1.webp": {
+      "sha256_normalized": "76ad41d8927de4b213b07223d77f0a46d45a826fdcba80aec556d772d845f3d5",
+      "bytes": 10396
+    },
+    "OEBPS/Images/p039.webp": {
+      "sha256_normalized": "1184f714161369d124cb5e32f5aa2c1095d101f68d70255c2a2a3a1af3925075",
+      "bytes": 162622
+    },
+    "OEBPS/Images/p062.webp": {
+      "sha256_normalized": "6b26101bdc7dc5895149ab6e180c90ef932ec3328117d065a07be6ea5422e04f",
+      "bytes": 110198
+    },
+    "OEBPS/Images/p137.webp": {
+      "sha256_normalized": "d13e22284af300fc642e5c0887f5af0127960db730b51de0132cc8443f874cec",
+      "bytes": 134032
+    },
+    "OEBPS/Images/p177.webp": {
+      "sha256_normalized": "d6d7efac7ad08138e3613454391e319209643a8741532fbc1bc571b5e6e0fde5",
+      "bytes": 202044
+    },
+    "OEBPS/Images/p196.webp": {
+      "sha256_normalized": "3f8c3eea59e6d0f258e0c8de0041a44c9aca75040cc17e327905abb6d130a47e",
+      "bytes": 133774
+    },
+    "OEBPS/Images/p209.webp": {
+      "sha256_normalized": "3f11d4c7a10117e8dd63874aaf29042dc80832d69ca35d7c58e5295c99687856",
+      "bytes": 106178
+    },
+    "OEBPS/Images/p242.webp": {
+      "sha256_normalized": "8632f8179277c13ea197418fb339404a15bfe2e275481bb1b57ce76d79366629",
+      "bytes": 142506
+    },
+    "OEBPS/Images/p267.webp": {
+      "sha256_normalized": "4c8775750d4579cc7361f983420fe5642515e8f4294047fa53640fdb0e01de07",
+      "bytes": 150768
+    },
+    "OEBPS/Images/p304.webp": {
+      "sha256_normalized": "79fa0cc023481c1ae5d497c42699f617c8d2dba69939d2fe3bcbed9363fab8c9",
+      "bytes": 202076
+    },
+    "OEBPS/Images/p318.webp": {
+      "sha256_normalized": "19b1e67ee4449c3ef65808bad7ad3a0a5728567a09c19a977586c54f392e01e4",
+      "bytes": 113034
+    },
+    "OEBPS/Images/t1.webp": {
+      "sha256_normalized": "448a80747860ebe9ce2fdcd5b629e5664ebd241a44ebd0622931cc103ed28aa1",
+      "bytes": 10692
+    },
+    "OEBPS/Images/t2.webp": {
+      "sha256_normalized": "486a68515f6a8cb9ff248c54dafcff1447c1164e36146301620ed77fa227bb52",
+      "bytes": 6920
+    },
+    "OEBPS/Images/t3.webp": {
+      "sha256_normalized": "dbb6d5505ef1786b96e915106e27b721805717dbbe815b6e3c78a7dee2333632",
+      "bytes": 6582
+    },
+    "OEBPS/Images/t4.webp": {
+      "sha256_normalized": "0a7a138ce1da288fbdb1146ede3410df594ec3a0e9603fabe78e0efeab402a09",
+      "bytes": 2762
+    },
+    "OEBPS/Images/toc-001.webp": {
+      "sha256_normalized": "363aaf631b5a2234fbf8125d6474da0a8c8f5df5b78333d412232f28dac0ba28",
+      "bytes": 85338
+    },
+    "OEBPS/Misc/script.js": {
+      "sha256_normalized": "8d0b712ebbf656f654c07170417b22880b53a28b1dbbdbb0ac87c1ffb18f68b9",
+      "bytes": 2654
+    },
+    "OEBPS/Styles/default.css": {
+      "sha256_normalized": "66151c44c9e3f682402e658019e57b4e2d2a9b8e5d9c1c50f75615982a3aa5d8",
+      "bytes": 7442
+    },
+    "OEBPS/Styles/necessary.css": {
+      "sha256_normalized": "769068bcafb6e945a1811c9033c6fa457f8b8387032dd27bdca18dba510f14e8",
+      "bytes": 12504
+    },
+    "OEBPS/Styles/stylesheet.css": {
+      "sha256_normalized": "6e2f59efe3104d57406888fc83d19cfbc3c17116d1f141560c1c4df0faab99b2",
+      "bytes": 118
+    },
+    "OEBPS/Text/TOC.xhtml": {
+      "sha256_normalized": "29d48be114da57b9f57259f9b8b785eb54f68c3b03bb89b90c234807b9add654",
+      "bytes": 2496
+    },
+    "OEBPS/Text/chapter0001.xhtml": {
+      "sha256_normalized": "8ac595a3a6a93217d9d4d78a31f79a3f38ddb4f531f83e2eb43e48a16aed9318",
+      "bytes": 50933,
+      "para_count": 528,
+      "footnote_count": 1
+    },
+    "OEBPS/Text/chapter0002.xhtml": {
+      "sha256_normalized": "f655d6fc71447459a56fe2bf3af6b994dda68b3cd87452814fd2ec3f3daedc3d",
+      "bytes": 16668,
+      "para_count": 152,
+      "footnote_count": 0
+    },
+    "OEBPS/Text/chapter0003.xhtml": {
+      "sha256_normalized": "f423067b5116c53effb79a0269933a6bd57a83352514c1483d40a9b0087d0a1f",
+      "bytes": 55701,
+      "para_count": 585,
+      "footnote_count": 3
+    },
+    "OEBPS/Text/chapter0004.xhtml": {
+      "sha256_normalized": "6fd528936defe34918f424631c4234692c9d75c428fda4c0b710121baf253cf5",
+      "bytes": 47547,
+      "para_count": 498,
+      "footnote_count": 1
+    },
+    "OEBPS/Text/chapter0005.xhtml": {
+      "sha256_normalized": "282b502873ec711446c6412e592a3da5b7ed128f9f72d1aeeca8c822666bf84e",
+      "bytes": 14941,
+      "para_count": 179,
+      "footnote_count": 0
+    },
+    "OEBPS/Text/chapter0006.xhtml": {
+      "sha256_normalized": "4dd64065b383a0a5a062b54b83880752c78f6526aa0d79b0381a5e6a107abcbd",
+      "bytes": 13630,
+      "para_count": 138,
+      "footnote_count": 0
+    },
+    "OEBPS/Text/chapter0007.xhtml": {
+      "sha256_normalized": "a476fda497a4fd79362856a0d52878b9678d798b7c967415a3e10e814ffc557a",
+      "bytes": 38910,
+      "para_count": 418,
+      "footnote_count": 1
+    },
+    "OEBPS/Text/chapter0008.xhtml": {
+      "sha256_normalized": "6b6ba685090ee7a7ff3b43aeeabc9a2f0e0426eb03ddc1898258ab5c7d43c835",
+      "bytes": 31168,
+      "para_count": 355,
+      "footnote_count": 0
+    },
+    "OEBPS/Text/chapter0009.xhtml": {
+      "sha256_normalized": "8106ee96fb1bab6df6a27495ebd35d37137866b633c90440a474a9ac986b9cee",
+      "bytes": 6841,
+      "para_count": 83,
+      "footnote_count": 0
+    },
+    "OEBPS/Text/chapter0010.xhtml": {
+      "sha256_normalized": "f6b8f7cd646dccb0997d994b49842217d6844f0da09dccceac79b18d71af4754",
+      "bytes": 20722,
+      "para_count": 215,
+      "footnote_count": 1
+    },
+    "OEBPS/Text/chapter0011.xhtml": {
+      "sha256_normalized": "c760a0e4a130d3e80d0fddc050156d99f7066821d6cb5961d601ac850ce0c56f",
+      "bytes": 37482,
+      "para_count": 401,
+      "footnote_count": 1
+    },
+    "OEBPS/Text/chapter0012.xhtml": {
+      "sha256_normalized": "bde8f98b2180969ff17cbd7e3396f9910a2a4a5a123748ba63e75de24f51315a",
+      "bytes": 27253,
+      "para_count": 297,
+      "footnote_count": 2
+    },
+    "OEBPS/Text/contents.xhtml": {
+      "sha256_normalized": "4d33f4c6fcc626f0abe905dce2dd23110d6a43a4dfff586369c59f380384ee31",
+      "bytes": 481
+    },
+    "OEBPS/Text/cover.xhtml": {
+      "sha256_normalized": "0b1c9e47e77e03b92bae02a63c6b088bf7dbdc0e19171c43c0570885bb99fb84",
+      "bytes": 474
+    },
+    "OEBPS/Text/illus0001.xhtml": {
+      "sha256_normalized": "61a4937fc0bf4555206a8b08ebf479a672e39f7fa26d4374c7d2dba2f14dc3eb",
+      "bytes": 486
+    },
+    "OEBPS/Text/illus0002.xhtml": {
+      "sha256_normalized": "06899b714730ae59dc6b1042afc39a2cf8c2f4845afadc6a22954bd6aeeb8e15",
+      "bytes": 486
+    },
+    "OEBPS/Text/illus0003.xhtml": {
+      "sha256_normalized": "a3537b64c9ab929ec0c8e65374950d687f04888a13dba6c1688fe35a75a882d7",
+      "bytes": 486
+    },
+    "OEBPS/Text/illus0004.xhtml": {
+      "sha256_normalized": "c843b275a6f322d188641c9fdffde877fab8a1b774d23a975ea3795e0053e9f4",
+      "bytes": 486
+    },
+    "OEBPS/Text/illus0005.xhtml": {
+      "sha256_normalized": "3fafcd0f99382e49599ddee084905be34135afc06710c32fe3da3ea0d1e2cac4",
+      "bytes": 486
+    },
+    "OEBPS/Text/message.xhtml": {
+      "sha256_normalized": "0c218374b7de343cdef3983c33004763440585519dce835aa98ea7a08101b0ae",
+      "bytes": 1681
+    },
+    "OEBPS/Text/navigation-documents.xhtml": {
+      "sha256_normalized": "0d2cbd40aa99bc897cfab2cc9afa7732633b6268e326f1e80a76f511dde5d0d1",
+      "bytes": 1872
+    },
+    "OEBPS/Text/pre.xhtml": {
+      "sha256_normalized": "7210854a3d7f410df40dfded76a26f4d36c7d032c3f4e91974173f907ccd7139",
+      "bytes": 545
+    },
+    "OEBPS/Text/special0001.xhtml": {
+      "sha256_normalized": "7425439c195024e017153a0b0ee29581c7b3804356e30ac599c088e4f72b63ea",
+      "bytes": 5521,
+      "para_count": 48,
+      "footnote_count": 1
+    },
+    "OEBPS/Text/special0002.xhtml": {
+      "sha256_normalized": "67fa4ff55090d6403f110c42a5f385edefb3d6288068bb2cde9c30035c85daa8",
+      "bytes": 4020,
+      "para_count": 35,
+      "footnote_count": 0
+    },
+    "OEBPS/Text/special0003.xhtml": {
+      "sha256_normalized": "07ed873e937ae1d1b8fc321754e2a5287f732d12c11025f6b3967217cda437b3",
+      "bytes": 5183,
+      "para_count": 48,
+      "footnote_count": 0
+    },
+    "OEBPS/Text/summary.xhtml": {
+      "sha256_normalized": "bad85023add0da26a997c6143951a6ec7a3f988410a8bb80479539b0f50062dd",
+      "bytes": 1127
+    },
+    "OEBPS/Text/title.xhtml": {
+      "sha256_normalized": "f4cbdcb906b81d6596f38869f52f63f61edfbcf3743190aa0490fb40de3f09d2",
+      "bytes": 1259
+    },
+    "OEBPS/content.opf": {
+      "sha256_normalized": "c1433df04887c002a10c4df29ee77b4ed6db171e3a428cf0e7d1bdf73b4387b3",
+      "bytes": 9505
+    },
+    "OEBPS/toc.ncx": {
+      "sha256_normalized": "e88b58676b6ff28fe022dcbf2977b943899c0db135fd6677cf7b0bf2e093d06a",
+      "bytes": 3944
+    },
+    "mimetype": {
+      "sha256_normalized": "e468e350d1143eb648f60c7b0bd6031101ec0544a361ca74ecef256ac901f48b",
+      "bytes": 20
+    }
+  }
+}

@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# Test temp / build artifacts
+/tmp/
+*.bak
+
+# Python archive caches (虽然只保留 .py，但防止 pip install 后 __pycache__ 进 git)
+archive/scripts-py/__pycache__/
+archive/scripts-py/*.pyc
+archive/scripts-py/.pytest_cache/
+archive/scripts-py/.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp

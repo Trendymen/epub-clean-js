@@ -1,0 +1,33 @@
+{
+  "name": "epub-clean-js",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "description": "义妹生活 EPUB 处理工具集：09 卷台版译文迁移到日翻容器（STERA 排版） / 11-15 卷多看商店版反混淆 + 路径修复 + 排版对齐 / 通用注释升级到 09 台简 V8 多端兼容风格。Node ESM 实现。",
+  "bin": {
+    "epub-clean-js": "bin/cli.js"
+  },
+  "scripts": {
+    "heal": "node bin/cli.js heal",
+    "align": "node bin/cli.js align",
+    "all": "node bin/cli.js all",
+    "migrate-translation": "node bin/cli.js migrate-translation",
+    "footnote-fix": "node bin/cli.js footnote-fix",
+    "test": "node --test --test-reporter=spec 'test/**/*.test.js'",
+    "test:unit": "node --test --test-reporter=spec 'test/unit/**/*.test.js'",
+    "test:e2e": "node --test --test-reporter=spec 'test/e2e/**/*.test.js'"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^4.5.0",
+    "yauzl-promise": "^4.0.0",
+    "yazl": "^3.0.0",
+    "nunjucks": "^3.2.4",
+    "fuzzball": "^2.2.2",
+    "linkedom": "^0.18.5",
+    "adm-zip": "^0.5.16",
+    "archiver": "^7.0.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

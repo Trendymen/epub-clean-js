@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="zh">
+<head>
+  <title>{{ title }}</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+  <link href="../Styles/stylesheet.css" type="text/css" rel="stylesheet"/>
+  <script type="text/javascript" src="../Misc/script.js"></script>
+  <style>
+    /* 覆盖 necessary.css 把 nav 隐藏的规则，确保 Apple Books 等读 nav 的阅读器能显示目录 */
+    nav, nav * {
+      display: revert !important;
+      height: auto !important;
+      line-height: normal !important;
+      font-size: revert !important;
+      font-family: inherit !important;
+    }
+    /* nav 内 li 紧贴，消除默认 margin 造成的"空行" */
+    nav ol, nav ul {
+      list-style: none;
+      margin: 0;
+      padding-left: 1em;
+    }
+    nav li {
+      margin: 0;
+      padding: 0;
+      line-height: 1.6;
+    }
+    nav h1 {
+      margin: 0.5em 0;
+      text-align: center;
+    }
+    nav a {
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+<nav epub:type="toc" id="toc">
+  <h1>{{ title }}</h1>
+  <ol>
+{%- macro li(entry, indent) -%}
+{%- if entry.children -%}
+{{ indent }}<li>
+{{ indent }}  <a href="{{ entry.href }}">{{ entry.title }}</a>
+{{ indent }}  <ol>
+{%- for child in entry.children %}
+{{ li(child, indent + "    ") }}
+{%- endfor %}
+{{ indent }}  </ol>
+{{ indent }}</li>
+{%- else -%}
+{{ indent }}<li><a href="{{ entry.href }}">{{ entry.title }}</a></li>
+{%- endif -%}
+{%- endmacro -%}
+{%- for entry in entries %}
+{{ li(entry, "    ") }}
+{%- endfor %}
+  </ol>
+</nav>
+</body>
+</html>
