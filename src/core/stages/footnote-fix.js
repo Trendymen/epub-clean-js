@@ -3,11 +3,12 @@
 // 通用 footnote 升级阶段：将任意 epub 中的脚注锚点 + aside 升级为
 // V8 多端兼容的 STERA 结构（与 books/yimei-seikatsu 同款）。
 //
-// 两层 API：
+// 三层 API：
 //  - 低层 buildSteraFootnote(fn, n, opts?) -> [refHtml, asideHtml]
 //      （与 books/yimei-seikatsu/migrate/footnote-cleaner.js 完全兼容；
 //        books 模块改为转发到本文件）
-//  - 高层 footnoteFixEpub(inEpub, outEpub, opts?) -> 解包/遍历章节/重写/重打包
+//  - stage footnoteFix(buf, ctx?) -> 在内存 EpubBuffer 上做 V8 升级（heal pipeline 用）
+//  - 高层 footnoteFixEpub(inEpub, outEpub, opts?) -> 解包/调 stage/重打包（CLI 用）
 //
 // 兼容输入：calibre-footnote / duokan-footnote / epub3 noteref / 普通 #anchor。
 // 输出结构：V8 权威多端兼容（<sub>+width="25"+aside+ol style+li+干净 <p>）。
@@ -18,9 +19,8 @@
 //  - 支持外部 opts 覆盖：iconRegular / iconReview / iconPathPrefix
 
 import { parseHTML } from "linkedom";
-import AdmZip from "adm-zip";
-import { readFile, writeFile, mkdir, rm, readdir } from "node:fs/promises";
-import path from "node:path";
+import { Buffer } from "node:buffer";
+import { readEpub, writeEpub } from "../zip-io.js";
 
 export const DEFAULT_ICON_REGULAR = "note.webp";
 export const DEFAULT_ICON_REVIEW = "note1.webp";
@@ -271,44 +271,104 @@ export function upgradeFootnotes(xhtml, opts = {}) {
 }
 
 /**
- * 探测 epub 解包目录里实际存在的图标资源。
+ * 探测 EpubBuffer.entries 里实际存在的图标资源。
  * 按目录优先级（OEBPS/Images > Images > OPS/Images）+ 扩展名优先级
  * （webp > png > jpg > jpeg > gif）查找 note.* / note1.*。
  *
- * @param {string} workDir epub 解包根目录
- * @returns {Promise<{ regular: string|null, review: string|null }>}
+ * @param {object} entries epub entries 对象（{ name -> Buffer }）
+ * @returns {{ regular: string|null, review: string|null }}
  */
-async function detectIcons(workDir) {
-  const candidates = [
-    path.join(workDir, 'OEBPS', 'Images'),
-    path.join(workDir, 'Images'),
-    path.join(workDir, 'OPS', 'Images'),
-  ];
+function detectIconsFromEntries(entries) {
+  const dirs = ['OEBPS/Images', 'Images', 'OPS/Images'];
   const exts = ['.webp', '.png', '.jpg', '.jpeg', '.gif'];
-  for (const dir of candidates) {
-    try {
-      const files = await readdir(dir);
-      let regular = null;
-      let review = null;
-      for (const ext of exts) {
-        if (!regular && files.includes(`note${ext}`)) regular = `note${ext}`;
-        if (!review && files.includes(`note1${ext}`)) review = `note1${ext}`;
-      }
-      if (regular || review) return { regular, review };
-    } catch {
-      // 目录不存在，继续找下一个
+  const names = Object.keys(entries);
+  for (const dir of dirs) {
+    let regular = null;
+    let review = null;
+    for (const ext of exts) {
+      const noteName = `${dir}/note${ext}`;
+      const note1Name = `${dir}/note1${ext}`;
+      if (!regular && names.includes(noteName)) regular = `note${ext}`;
+      if (!review && names.includes(note1Name)) review = `note1${ext}`;
     }
+    if (regular || review) return { regular, review };
   }
   return { regular: null, review: null };
 }
 
 /**
- * 整本 epub 升级。
- *  1. 解包到临时目录
- *  2. 探测图标资源（note.* / note1.*）
- *  3. 遍历章节文本目录里所有 *.xhtml / *.html
- *  4. 对每章执行 upgradeFootnotes（透传图标 opts）
- *  5. 重打包到 outEpubPath（mimetype 第一个、无压缩）
+ * 探测章节文本目录前缀（OEBPS/Text / Text / OPS/Text）。
+ * @param {object} entries
+ * @returns {string|null} 例如 "OEBPS/Text"，若都没有返回 null
+ */
+function detectTextDir(entries) {
+  const candidates = ['OEBPS/Text', 'Text', 'OPS/Text'];
+  const names = Object.keys(entries);
+  for (const dir of candidates) {
+    if (names.some((n) => n.startsWith(`${dir}/`))) return dir;
+  }
+  return null;
+}
+
+/**
+ * footnote-fix 作为 pipeline stage 的形态。
+ * 在内存 EpubBuffer 上执行 V8 升级：
+ *  1. 从 entries 探测图标资源 + 章节文本目录
+ *  2. 对 textDir 下所有 *.xhtml/*.html 调 upgradeFootnotes
+ *  3. 返回新的 EpubBuffer（entries 复制 + 替换被改文件）
+ *
+ * 可选 ctx.footnoteOpts 覆盖：iconRegular / iconReview / iconPathPrefix。
+ *
+ * @param {{ names: string[], entries: object, meta?: any }} buf
+ * @param {object} [ctx]
+ * @returns {{ names: string[], entries: object, meta?: any }}
+ */
+export function footnoteFix(buf, ctx = {}) {
+  const opts = ctx.footnoteOpts ?? {};
+  const detected = detectIconsFromEntries(buf.entries);
+  const effectiveOpts = {
+    iconRegular: opts.iconRegular ?? detected.regular ?? DEFAULT_ICON_REGULAR,
+    iconReview:
+      opts.iconReview ??
+      detected.review ??
+      opts.iconRegular ??
+      detected.regular ??
+      DEFAULT_ICON_REVIEW,
+    iconPathPrefix: opts.iconPathPrefix ?? DEFAULT_ICON_PATH_PREFIX,
+  };
+
+  const textDir = detectTextDir(buf.entries);
+  if (!textDir) {
+    console.warn('[footnote-fix] 跳过：找不到章节文本目录（OEBPS/Text、Text、OPS/Text）');
+    return buf;
+  }
+
+  console.log(
+    `[footnote-fix] icons: regular=${effectiveOpts.iconRegular}, review=${effectiveOpts.iconReview} textDir=${textDir}`,
+  );
+
+  const newEntries = { ...buf.entries };
+  let changedFiles = 0;
+  for (const name of Object.keys(buf.entries)) {
+    if (!name.startsWith(`${textDir}/`)) continue;
+    if (!(name.endsWith('.xhtml') || name.endsWith('.html'))) continue;
+    const before = buf.entries[name].toString('utf8');
+    const after = upgradeFootnotes(before, effectiveOpts);
+    if (after !== before) {
+      newEntries[name] = Buffer.from(after, 'utf8');
+      changedFiles++;
+    }
+  }
+  console.log(`[footnote-fix] changed ${changedFiles} chapter(s)`);
+
+  return { ...buf, entries: newEntries };
+}
+
+/**
+ * 整本 epub 升级（CLI 入口用）。
+ *  1. readEpub 解包到 EpubBuffer
+ *  2. 调用 footnoteFix stage
+ *  3. writeEpub 输出到 outEpubPath
  *
  * @param {string} inEpubPath
  * @param {string} outEpubPath
@@ -319,102 +379,43 @@ async function detectIcons(workDir) {
  * @returns {Promise<{ textDir: string, files: number, changedFiles: number, icons: { regular: string, review: string } }>}
  */
 export async function footnoteFixEpub(inEpubPath, outEpubPath, opts = {}) {
-  const workDir = `/tmp/footnote-fix-${process.pid}-${Date.now()}`;
-  await rm(workDir, { recursive: true, force: true });
-  await mkdir(workDir, { recursive: true });
+  const buf = await readEpub(inEpubPath);
 
-  try {
-    // 解包
-    const zipIn = new AdmZip(inEpubPath);
-    zipIn.extractAllTo(workDir, true);
-
-    // 探测图标资源（review 找不到时 fallback 到 regular，避免引用不存在文件）
-    const detected = await detectIcons(workDir);
-    const effectiveOpts = {
-      iconRegular: opts.iconRegular ?? detected.regular ?? DEFAULT_ICON_REGULAR,
-      iconReview:
-        opts.iconReview ??
-        detected.review ??
-        opts.iconRegular ??
-        detected.regular ??
-        DEFAULT_ICON_REVIEW,
-      iconPathPrefix: opts.iconPathPrefix ?? DEFAULT_ICON_PATH_PREFIX,
-    };
-
-    console.log(
-      `[footnote-fix] icons: regular=${effectiveOpts.iconRegular}, review=${effectiveOpts.iconReview}`,
-    );
-
-    // 找章节文本目录
-    const candidates = [
-      path.join(workDir, 'OEBPS', 'Text'),
-      path.join(workDir, 'Text'),
-      path.join(workDir, 'OPS', 'Text'),
-    ];
-    let textDir = null;
-    for (const c of candidates) {
-      try {
-        await readdir(c);
-        textDir = c;
-        break;
-      } catch {
-        // 继续找
-      }
-    }
-    if (!textDir) {
-      throw new Error('找不到章节文本目录（试过 OEBPS/Text、Text、OPS/Text）');
-    }
-
-    // 处理每个 xhtml
-    const files = (await readdir(textDir)).filter(
-      (f) => f.endsWith('.xhtml') || f.endsWith('.html'),
-    );
-    let changedFiles = 0;
-    for (const f of files) {
-      const fp = path.join(textDir, f);
-      const xhtml = await readFile(fp, 'utf8');
-      const upgraded = upgradeFootnotes(xhtml, effectiveOpts);
-      if (upgraded !== xhtml) changedFiles++;
-      await writeFile(fp, upgraded);
-    }
-
-    // 重打包：mimetype 必须第一、无压缩
-    const zipOut = new AdmZip();
-    const mimetypePath = path.join(workDir, 'mimetype');
-    try {
-      const mimeBuf = await readFile(mimetypePath);
-      // adm-zip 的第四个参数是 storedAsFile attributes；用 store（不压缩）方式
-      zipOut.addFile('mimetype', mimeBuf);
-    } catch {
-      // 没 mimetype 也行（少数 epub）
-    }
-
-    async function walkAdd(dir, base = workDir) {
-      for (const ent of await readdir(dir, { withFileTypes: true })) {
-        const full = path.join(dir, ent.name);
-        const rel = path.relative(base, full);
-        if (rel === 'mimetype') continue;
-        if (ent.isDirectory()) {
-          await walkAdd(full, base);
-        } else {
-          const buf = await readFile(full);
-          zipOut.addFile(rel.split(path.sep).join('/'), buf);
-        }
-      }
-    }
-    await walkAdd(workDir);
-    zipOut.writeZip(outEpubPath);
-
-    return {
-      textDir: path.relative(workDir, textDir),
-      files: files.length,
-      changedFiles,
-      icons: {
-        regular: effectiveOpts.iconRegular,
-        review: effectiveOpts.iconReview,
-      },
-    };
-  } finally {
-    await rm(workDir, { recursive: true, force: true });
+  // 探测信息用于返回结构（供 CLI 打印）
+  const detected = detectIconsFromEntries(buf.entries);
+  const effectiveIcons = {
+    regular: opts.iconRegular ?? detected.regular ?? DEFAULT_ICON_REGULAR,
+    review:
+      opts.iconReview ??
+      detected.review ??
+      opts.iconRegular ??
+      detected.regular ??
+      DEFAULT_ICON_REVIEW,
+  };
+  const textDir = detectTextDir(buf.entries);
+  if (!textDir) {
+    throw new Error('找不到章节文本目录（试过 OEBPS/Text、Text、OPS/Text）');
   }
+
+  const before = { ...buf.entries };
+  const outBuf = footnoteFix(buf, { footnoteOpts: opts });
+
+  // 统计章节文件数（textDir 下 xhtml/html）和被改动文件数
+  const chapterNames = Object.keys(outBuf.entries).filter(
+    (n) =>
+      n.startsWith(`${textDir}/`) && (n.endsWith('.xhtml') || n.endsWith('.html')),
+  );
+  let changedFiles = 0;
+  for (const n of chapterNames) {
+    if (before[n] !== outBuf.entries[n]) changedFiles++;
+  }
+
+  await writeEpub(outEpubPath, outBuf.entries);
+
+  return {
+    textDir,
+    files: chapterNames.length,
+    changedFiles,
+    icons: effectiveIcons,
+  };
 }

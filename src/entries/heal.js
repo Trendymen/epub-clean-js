@@ -4,7 +4,7 @@ import path from "node:path";
 import profile from "../../books/yimei-seikatsu/profile.js";
 import { readEpub, writeEpub } from "../core/zip-io.js";
 import { runPipeline } from "../core/pipeline.js";
-import { strip, deobfuscate, heal } from "../core/stages/index.js";
+import { strip, deobfuscate, heal, footnoteFix, ncxFormat } from "../core/stages/index.js";
 
 async function main() {
   fs.mkdirSync(profile.paths.healedDir, { recursive: true });
@@ -16,7 +16,8 @@ async function main() {
       continue;
     }
     const inBuf = await readEpub(src);
-    const outBuf = await runPipeline(inBuf, [strip, deobfuscate, heal], { profile, volNum: vol, srcPath: src });
+    // 11-15 卷反混淆后内容是台简译本 → 在 dc:title 末尾打 [台简] 尾缀（heal stage 内幂等）
+    const outBuf = await runPipeline(inBuf, [strip, deobfuscate, heal, footnoteFix, ncxFormat], { profile, volNum: vol, srcPath: src, titleLangSuffix: "[台简]" });
     await writeEpub(dst, outBuf.entries);
     console.log(`✅ 卷 ${vol} → ${path.basename(dst)} (${fs.statSync(dst).size.toLocaleString()} B)`);
   }
