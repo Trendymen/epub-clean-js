@@ -95,6 +95,9 @@ const SRC_DESCRIPTION_09 = `我紧紧握住他牵着我的那只手，一点都�
 const SRC_TO_STERA_09 = { '191020.jpg': 'cover.jpg' };
 
 // 书名信息
+// 注：09 卷物理文件名带 .translated 内部状态尾缀，但卷标题（dc:title）保持 Python golden
+// 一致的 "义妹生活 09"（不追加 [台简] 语言尾缀），以维持 Phase 3 byte-level 基线兼容。
+// 11-15 卷 heal 链路在 stages/heal.js 内独立给 dc:title 追加 [台简] 尾缀（无 golden 约束）。
 const BOOK_TITLE_09 = '义妹生活 09';
 
 // ============================================================

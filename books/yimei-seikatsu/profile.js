@@ -22,11 +22,17 @@ export default {
     translatedDir: path.join(PROJECT_ROOT, "output", "translated"),  // 09 卷 migrate-translation 默认输出
   },
   vols: [11, 12, 13, 14, 15],
+  // 文件名规则：
+  // - 源 epub（项目根，raw）：[三河ごーすと].义妹生活.NN.[日翻].epub
+  // - 产物（output/ 子目录）：带 .healed / .clean / .translated 内部状态尾缀，
+  //   用于和源 epub 在物理文件名层面区分，避免拷错。
+  // - 注意：epub 内部 <dc:title> 卷标题里**不**带这些内部状态尾缀，
+  //   只带 [台简] / [日翻] 语言版本标识（见 migrate-epub.js 与 heal pipeline 内的 title 处理）。
   filePatterns: {
     raw:        (n) => `[三河ごーすと].义妹生活.${String(n).padStart(2, "0")}.[日翻].epub`,
-    healed:     (n) => `[三河ごーすと].义妹生活.${String(n).padStart(2, "0")}.[日翻].epub`,
-    clean:      (n) => `[三河ごーすと].义妹生活.${String(n).padStart(2, "0")}.[日翻].epub`,
-    translated: (n) => `[三河ごーすと].义妹生活.${String(n).padStart(2, "0")}.[台简].epub`,
+    healed:     (n) => `[三河ごーすと].义妹生活.${String(n).padStart(2, "0")}.[日翻].healed.epub`,
+    clean:      (n) => `[三河ごーすと].义妹生活.${String(n).padStart(2, "0")}.[日翻].clean.epub`,
+    translated: (n) => `[三河ごーすと].义妹生活.${String(n).padStart(2, "0")}.[台简].translated.epub`,
   },
   metadataDefaults: {
     rights: "voidlord",

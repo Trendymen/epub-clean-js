@@ -18,10 +18,33 @@ function tagName(node) {
   return null;
 }
 
-function patchMetadataCommon(pkg, srcPath) {
+// dc:title 末尾追加语言版本尾缀（如 ` [台简]`），用于在阅读器书架上区分。
+// 不重复追加：已存在形如 [台简] / [日翻] / [台繁] 等 [...]/【...】 尾缀时跳过。
+// 也保证不把内部状态尾缀（.healed/.translated/.clean，那是物理文件名的事）写进卷标题。
+function patchDcTitleLangSuffix(metadata, suffix) {
+  if (!suffix) return;
+  for (const node of childrenOf(metadata)) {
+    if (tagName(node) !== "dc:title") continue;
+    const arr = node["dc:title"];
+    if (!Array.isArray(arr) || arr.length === 0) continue;
+    // 取首个 #text 子节点
+    const txtNode = arr.find((c) => "#text" in c);
+    if (!txtNode) continue;
+    const cur = String(txtNode["#text"] ?? "").trim();
+    if (!cur) continue;
+    // 已带 [xxx] 或【xxx】尾缀则不动
+    if (/[\[【][^\]】]+[\]】]\s*$/.test(cur)) continue;
+    txtNode["#text"] = `${cur} ${suffix}`;
+  }
+}
+
+function patchMetadataCommon(pkg, srcPath, titleLangSuffix) {
   const metadata = findFirst(childrenOf(pkg), "metadata");
   if (!metadata) return;
   const kids = childrenOf(metadata);
+
+  // 0. dc:title 语言版本尾缀（如 [台简]） — 11-15 卷反混淆后内容是台简
+  patchDcTitleLangSuffix(metadata, titleLangSuffix);
 
   // 1. 删 duokan/zhangyue identifier + 关联 refines
   const refinedIds = new Set();
@@ -101,7 +124,8 @@ export function heal(buf, ctx) {
   const { opfPath, opfTree } = buf.meta;
   const pkg = findFirst(opfTree, "package");
 
-  patchMetadataCommon(pkg, ctx.srcPath);
+  // ctx.titleLangSuffix 由调用方注入（如 entries/heal.js 传 "[台简]"）；缺省不动 title
+  patchMetadataCommon(pkg, ctx.srcPath, ctx.titleLangSuffix);
 
   // 序列化 OPF（heal 写入第一次，后续 align 可能再覆盖）
   const newEntries = { ...buf.entries };
