@@ -95,10 +95,13 @@ const SRC_DESCRIPTION_09 = `我紧紧握住他牵着我的那只手，一点都�
 const SRC_TO_STERA_09 = { '191020.jpg': 'cover.jpg' };
 
 // 书名信息
-// 注：09 卷物理文件名带 .translated 内部状态尾缀，但卷标题（dc:title）保持 Python golden
-// 一致的 "义妹生活 09"（不追加 [台简] 语言尾缀），以维持 Phase 3 byte-level 基线兼容。
-// 11-15 卷 heal 链路在 stages/heal.js 内独立给 dc:title 追加 [台简] 尾缀（无 golden 约束）。
-const BOOK_TITLE_09 = '义妹生活 09';
+// 09 卷 dc:title 追加 [台简] 语言尾缀，与 11-15 卷 heal 链路里追加的 [日翻] 尾缀风格一致，
+// 让最终 epub 内部标题也能一眼分辨语言版本。
+// 注：物理文件名带 .translated 内部状态尾缀（由 profile.filePatterns 控制），与 dc:title 是
+// 两套独立标识——文件名尾缀标「产物阶段」，dc:title 尾缀标「语言版本」。
+// golden（Python byte-level 基线）已脱离，Node 现为自身真值源（test/fixtures/yimei09/golden-py
+// 由本入口产物重生而来）。
+const BOOK_TITLE_09 = '义妹生活 09 [台简]';
 
 // ============================================================
 // 工具函数

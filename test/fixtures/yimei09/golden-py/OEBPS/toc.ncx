@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1" xml:lang="zh">
   <head>
-    <meta name="dtb:uid" content="urn:uuid:b13bffb8-c955-4906-be9f-df579ec1367c"/>
+    <meta name="dtb:uid" content="urn:uuid:1ecf00ce-ba63-4bb0-8c68-dfa0f84d2a94"/>
     <meta name="dtb:depth" content="2"/>
   </head>
-  <docTitle><text>义妹生活 09</text></docTitle>
+  <docTitle><text>义妹生活 09 [台简]</text></docTitle>
   <navMap>
     <navPoint id="navPoint-1" playOrder="1">
       <navLabel><text>封面</text></navLabel>

@@ -1,6 +1,6 @@
 {
   "source": "[三河ごーすと].义妹生活.09.[台简].epub (Python 版, 引言修复后)",
-  "generated_at": "2026-05-25T03:45:59.765Z",
+  "generated_at": "2026-05-25T04:59:20.560Z",
   "files": {
     "META-INF/com.apple.ibooks.display-options.xml": {
       "sha256_normalized": "e0203d265e0663af016377911803447c9f5d3ad5d81a0dd0ffc5c79c83723d9e",
@@ -317,12 +317,12 @@
       "bytes": 1259
     },
     "OEBPS/content.opf": {
-      "sha256_normalized": "4b11d970a748c429e534c22d2ca974153965fc8c499282be6e1b694a71a54019",
-      "bytes": 9505
+      "sha256_normalized": "54a65e91498aa16981d9ece94652fd5319f313754b672becd64d96685e42656a",
+      "bytes": 9514
     },
     "OEBPS/toc.ncx": {
-      "sha256_normalized": "23e39e4a74599d364a2434d0acc1883f719a72632a3298d02fdd078b577d7755",
-      "bytes": 4251
+      "sha256_normalized": "b136ba82c4134befd7a049e5f98a979ae64e88cdcad315e03d3e88b0894bd82d",
+      "bytes": 4260
     },
     "mimetype": {
       "sha256_normalized": "e468e350d1143eb648f60c7b0bd6031101ec0544a361ca74ecef256ac901f48b",

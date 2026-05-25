@@ -2,7 +2,7 @@
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="BookId" prefix="duokan-page: http://www.duokan.com/duokan-page/">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"
             xmlns:opf="http://www.idpf.org/2007/opf">
-    <dc:title>义妹生活 09</dc:title>
+    <dc:title>义妹生活 09 [台简]</dc:title>
     <dc:creator id="creator-aut">三河ごーすと</dc:creator>
     <meta refines="#creator-aut" property="role" scheme="marc:relators">aut</meta>
     <dc:creator id="creator-ill">hiten</dc:creator>
@@ -20,7 +20,7 @@
 「相遇」至今一年，历经许多事而改变的两人，迎来高中生活最后的夏天。
 经历过友情、青春、新的相遇之后，「兄妹」所面对的感情是──
     ]]></dc:description>
-    <dc:identifier id="BookId">urn:uuid:655d9562-980d-45d3-ae84-9a60560c6e39</dc:identifier>
+    <dc:identifier id="BookId">urn:uuid:1ecf00ce-ba63-4bb0-8c68-dfa0f84d2a94</dc:identifier>
     <dc:subject>校园</dc:subject>
     <dc:subject>青春</dc:subject>
     <dc:subject>恋爱</dc:subject>
@@ -28,7 +28,7 @@
     <meta property="belongs-to-collection">义妹生活</meta>
     <meta property="group-position">9</meta>
     <meta name="cover" content="cover-image"/>
-    <meta property="dcterms:modified">2026-05-22T10:14:36Z</meta>
+    <meta property="dcterms:modified">2026-05-25T04:59:02Z</meta>
   </metadata>
   <manifest>
 
