@@ -17,8 +17,8 @@ async function main() {
       continue;
     }
     const inBuf = await readEpub(src);
-    // 11-15 卷反混淆+排版对齐后内容是台简译本 → dc:title 末尾打 [台简] 尾缀（heal stage 内幂等）
-    const outBuf = await runPipeline(inBuf, [strip, deobfuscate, heal, align], { profile, volNum: vol, srcPath: src, titleLangSuffix: "[台简]" });
+    // 11-15 卷内容是日翻版（用户已确认没有台简译文） → dc:title 末尾打 [日翻] 尾缀（heal stage 内幂等）
+    const outBuf = await runPipeline(inBuf, [strip, deobfuscate, heal, align], { profile, volNum: vol, srcPath: src, titleLangSuffix: "[日翻]" });
     await writeEpub(dst, outBuf.entries);
     const r = await validateOutput(dst);
     const flag = r.ok ? "✅" : "❌";
