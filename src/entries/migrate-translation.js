@@ -1,5 +1,6 @@
 import { parseArgs } from "node:util";
 import path from "node:path";
+import fs from "node:fs";
 
 const { values: opts } = parseArgs({
   options: {
@@ -13,7 +14,8 @@ const { values: opts } = parseArgs({
   strict: true,
 });
 
-for (const k of ["src", "dst", "ref", "out"]) {
+// 必填校验：src / dst / ref 必须显式提供，out 可选（默认走 profile）
+for (const k of ["src", "dst", "ref"]) {
   if (!opts[k]) {
     console.error(`Missing required --${k}`);
     process.exit(2);
@@ -24,13 +26,23 @@ const profileMod = await import(path.resolve("books", opts.book, "profile.js"));
 const profile = profileMod.default;
 const migrateMod = await import(path.resolve("books", opts.book, "migrate/migrate-epub.js"));
 
+// out 可选：默认 profile.paths.translatedDir + filePatterns.translated(volume)
+const outDefault = path.join(
+  profile.paths.translatedDir,
+  profile.filePatterns.translated(opts.volume),
+);
+const outPath = opts.out ? path.resolve(opts.out) : outDefault;
+
+// 确保输出目录存在
+fs.mkdirSync(path.dirname(outPath), { recursive: true });
+
 await migrateMod.default({
   srcEpub: path.resolve(opts.src),
   dstEpub: path.resolve(opts.dst),
   refEpub: path.resolve(opts.ref),
-  outEpub: path.resolve(opts.out),
+  outEpub: outPath,
   volume: opts.volume,
   profile,
 });
 
-console.log("migrate-translation 完成:", opts.out);
+console.log("migrate-translation 完成:", outPath);

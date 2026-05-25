@@ -42,11 +42,11 @@ node bin/cli.js align
 node bin/cli.js all
 
 # 09 卷台版译文迁移（Phase 1 完成）
+# --out 可选；缺省落到 output/translated/[三河ごーすと].义妹生活.09.[台简].translated.epub
 node bin/cli.js migrate-translation \
   --src "义妹生活 - 09台简粗糙排版.epub" \
   --dst "[三河ごーすと].义妹生活.09.[日翻].epub" \
   --ref "[三河ごーすと].义妹生活.07.[台简].epub" \
-  --out "[三河ごーすと].义妹生活.09.[台简].epub" \
   --volume 09 \
   --book yimei-seikatsu
 
@@ -70,3 +70,15 @@ node bin/cli.js footnote-fix --in input.epub --out output.epub
 - migrate-translation e2e: 0 mismatch / 74 files
 - footnote-fix e2e: PASS
 - 正式产物 [09.台简].epub 已是 Node 版输出
+
+## 产物位置
+
+历史目录 `unlocked/` 已废弃。所有程序产物现在统一落在项目根 `output/` 下：
+
+| 子目录 | 内容 | 命名 |
+|---|---|---|
+| `output/translated/` | 09 卷 migrate-translation 迁移产物 | `[三河ごーすと].义妹生活.NN.[台简].translated.epub` |
+| `output/healed/`     | 11-15 卷 strip/deobfuscate/heal 反混淆产物 | `[三河ごーすと].义妹生活.NN.[日翻].healed.epub` |
+| `output/clean/`      | 11-15 卷 align 排版对齐产物 | `[三河ごーすと].义妹生活.NN.[日翻].clean.epub` |
+
+产物文件名一律带 `.translated` / `.healed` / `.clean` 后缀，与项目根源 epub 区分（源 epub 不带这类后缀）。`output/` 已加入 `.gitignore`，不入库。

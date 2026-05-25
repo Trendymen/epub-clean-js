@@ -14,17 +14,19 @@ export default {
   name: "义妹生活",
   author: "三河ごーすと",
 
-  // --- 现有 heal/align 入口依赖字段（保持不动） ---
+  // --- 现有 heal/align 入口依赖字段 ---
   paths: {
-    rawDir:    PROJECT_ROOT,
-    healedDir: path.join(PROJECT_ROOT, "unlocked", "healed"),
-    cleanDir:  path.join(PROJECT_ROOT, "unlocked", "clean"),
+    rawDir:        PROJECT_ROOT,
+    healedDir:     path.join(PROJECT_ROOT, "output", "healed"),
+    cleanDir:      path.join(PROJECT_ROOT, "output", "clean"),       // 保留兼容 align entry
+    translatedDir: path.join(PROJECT_ROOT, "output", "translated"),  // 09 卷 migrate-translation 默认输出
   },
   vols: [11, 12, 13, 14, 15],
   filePatterns: {
-    raw:    (n) => `[三河ごーすと].义妹生活.${String(n).padStart(2, "0")}.[日翻].epub`,
-    healed: (n) => `[三河ごーすと].义妹生活.${String(n).padStart(2, "0")}.[日翻].healed.epub`,
-    clean:  (n) => `[三河ごーすと].义妹生活.${String(n).padStart(2, "0")}.[日翻].clean.epub`,
+    raw:        (n) => `[三河ごーすと].义妹生活.${String(n).padStart(2, "0")}.[日翻].epub`,
+    healed:     (n) => `[三河ごーすと].义妹生活.${String(n).padStart(2, "0")}.[日翻].epub`,
+    clean:      (n) => `[三河ごーすと].义妹生活.${String(n).padStart(2, "0")}.[日翻].epub`,
+    translated: (n) => `[三河ごーすと].义妹生活.${String(n).padStart(2, "0")}.[台简].epub`,
   },
   metadataDefaults: {
     rights: "voidlord",

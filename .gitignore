@@ -11,6 +11,9 @@ node_modules/
 /tmp/
 *.bak
 
+# 程序产物（项目根 output/，含 translated/healed/clean 子目录）
+output/
+
 # Python archive caches (虽然只保留 .py，但防止 pip install 后 __pycache__ 进 git)
 archive/scripts-py/__pycache__/
 archive/scripts-py/*.pyc

@@ -24,10 +24,11 @@ node bin/cli.js migrate-translation \
   --src "/path/to/义妹生活 - 09台简粗糙排版.epub" \
   --dst "/path/to/[三河ごーすと].义妹生活.09.[日翻].epub" \
   --ref "/path/to/[三河ごーすと].义妹生活.07.[台简].epub" \
-  --out "/path/to/[三河ごーすと].义妹生活.09.[台简].epub" \
   --volume 09 \
   --book yimei-seikatsu
 ```
+
+`--out` 可选：缺省时默认输出到 `<PROJECT_ROOT>/output/translated/[三河ごーすと].义妹生活.<volume>.[台简].epub`（由 `profile.paths.translatedDir` + `filePatterns.translated(volume)` 拼出）。需要落到其他位置传 `--out /your/path.epub` 覆盖即可。书名只带 `[台简]` 尾缀，与源文件靠目录区分（源在项目根，产物在 `output/translated/`）。
 
 ### footnote-fix（通用注释升级）
 
@@ -47,11 +48,18 @@ node bin/cli.js footnote-fix --in input.epub --out output.epub
 ### 11-15 卷反混淆（heal/align）
 
 ```bash
-npm run heal   # 卷 11-15 → unlocked/healed/*.healed.epub
-npm run align  # 卷 11-15 → unlocked/clean/*.clean.epub
+npm run heal   # 卷 11-15 → output/healed/[三河ごーすと].义妹生活.NN.[日翻].healed.epub
+npm run align  # 卷 11-15 → output/clean/[三河ごーすと].义妹生活.NN.[日翻].clean.epub
 ```
 
-源 epub 默认从项目根目录读取（`profile.paths.rawDir = PROJECT_ROOT`，4 层上跳）。
+源 epub 默认从项目根目录读取（`profile.paths.rawDir = PROJECT_ROOT`，3 层上跳）。
+
+> 历史目录 `unlocked/` 已废弃，所有程序产物现在统一落到项目根 `output/` 下：
+> - `output/translated/` = 09 卷迁移产物（`*.[台简].translated.epub`）
+> - `output/healed/` = 11-15 卷反混淆产物（`*.[日翻].healed.epub`）
+> - `output/clean/` = align 产物（`*.[日翻].clean.epub`）
+>
+> 产物文件名一律带 `.translated` / `.healed` / `.clean` 后缀，避免与项目根的源 epub 同名混淆。
 
 ## 测试
 
@@ -99,7 +107,7 @@ epub-clean-js/
 
 工程本身**内部完全自洽**（零硬编码路径、零跨工程相对引用）。仅 1 个**有意的外部耦合**：
 
-`books/yimei-seikatsu/profile.js` 通过 `PROJECT_ROOT = path.resolve(__dirname, "../../../..")` 计算项目根，用于 11-15 卷 `heal/align` 读源 epub + 写 `unlocked/healed/`、`unlocked/clean/`。
+`books/yimei-seikatsu/profile.js` 通过 `PROJECT_ROOT = path.resolve(__dirname, "../../..")` 计算项目根，用于 11-15 卷 `heal/align` 读源 epub + 写 `output/healed/`、`output/clean/`，以及 `migrate-translation` 默认写 `output/translated/`。
 
 把整个 `epub-clean-js/` 拷走后，只要带上源 epub 文件作为输入，所有子命令都能独立工作。
 
