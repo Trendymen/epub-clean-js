@@ -17,7 +17,7 @@
 | 文件 | 动作 | 职责 |
 |---|---|---|
 | `package.json` | 修改 | 加 `subset-font` 依赖 |
-| `books/source-han-sans-sc/` | 新增 | 思源黑体 SC（Regular/Medium/Bold OTF） |
+| `books/source-han-sans-sc/` | 已下载 | 思源黑体 SC（**经高清核实 ch1 实为粗宋体，本方案最终不使用黑体；已下载留作备用，被 .gitignore 忽略**） |
 | `src/core/font-subset.js` | 新增 | 字符集提取 + 子集化 + CSS 重写 + 两个 IO 适配器 |
 | `test/unit/yimei-seikatsu/font-subset.test.js` | 新增 | 模块单测 |
 | `books/yimei-seikatsu/lightnovel-html/index.js` | 修改 | `mediaTypeFor` 加 .otf；集成 `applyToFiles`；`simplifyText` 加 U+223C 规范化 |
@@ -26,21 +26,21 @@
 
 **关键不变量**：两条管线的字体 manifest 都是「扫目录/扫 files map」自动生成（migrate-epub.js:674、lightnovel-html/index.js:1196），所以删旧字体 + 写新字体后 manifest 自动反映，无需手改 manifest 列表，只需让 media-type 映射识别 `.otf`。
 
-**字符集策略**：
+**字符集策略**（全书 9 部位经高清核实**全为宋体**，只需 2 个思源宋字重）：
 - `regular` 子集 = 全书所有字符（正文用 Regular，覆盖全书）。
-- `bold` 子集 = 全书所有 `<h3>` 文本 + 目录页（TOC.xhtml/navigation-documents.xhtml）全文 + 全书非汉字符号。
-- `sans` 子集 = 全书所有 `<h4>` 文本 + `class` 含 `cut`/`ch1` 的元素文本 + 全书非汉字符号。
+- `bold` 子集 = 全书所有 `<h3>` + `<h4>` 文本 + `class` 含 `cut`/`ch1` 的元素文本 + 目录页（TOC.xhtml/navigation-documents.xhtml）全文 + 全书非汉字符号。
 
 **CSS 字体名映射**（旧 token → 新 family role）：
 - `main/ch3/sum/mes/note/cont/int/title` → serif（`"Source Han Serif SC"`）
-- `ch2/ctt1/ctt2` → serifBold（`"Source Han Serif SC Bold"`）
-- `ch1` → sans（`"Source Han Sans SC Bold"`）
+- `ch2/ctt1/ctt2/ch1` → serifBold（`"Source Han Serif SC Bold"`）
 - `illus1-5/num/emoji/sym` 及其它未知 token → 删除该 `font-family` 声明（孤儿）
 - `initial/inherit` → 保留不动
 
 ---
 
 ## Task 1: 依赖与思源黑体资产 + 定 ch1 字重
+
+> ⚠️ **执行后修正**：ch1 经高清核实为**粗宋体**（非黑体），思源黑体最终**不使用**（已下载留作备用，被 .gitignore 忽略）。本任务的 subset-font 依赖安装与 commit 仍有效；Step 3「在黑体里定字重」已作废，ch1 归思源宋 Bold。
 
 **Files:**
 - Modify: `package.json`
@@ -120,7 +120,7 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import { extractCharsets } from '../../../src/core/font-subset.js';
 
-test('extractCharsets: regular 收全字符，bold 收 h3+目录，sans 收 h4/.cut', () => {
+test('extractCharsets: regular 收全字符，bold 收 h3/h4/目录/.cut', () => {
   const xhtmlList = [
     { name: 'OEBPS/Text/chapter0001.xhtml', text: '<h3>序幕假日</h3><p>正文甲乙</p><h4>分隔丙</h4>' },
     { name: 'OEBPS/Text/TOC.xhtml', text: '<a href="x">目录条丁</a>' },
@@ -132,14 +132,13 @@ test('extractCharsets: regular 收全字符，bold 收 h3+目录，sans 收 h4/.
   // bold = h3(序幕假日) + 目录(目录条丁)
   for (const c of '序幕假日目录条丁') assert.ok(cs.bold.has(c), `bold 缺 ${c}`);
   assert.ok(!cs.bold.has('正'), 'bold 不应含正文字');
-  // sans = h4(分隔丙) + .cut(场景戊)
-  for (const c of '分隔丙场景戊') assert.ok(cs.sans.has(c), `sans 缺 ${c}`);
-  assert.ok(!cs.sans.has('甲'), 'sans 不应含正文字');
+  // h4(分隔丙) + .cut(场景戊) 也并入 bold（ch1 实为粗宋，与标题同字重）
+  for (const c of '分隔丙场景戊') assert.ok(cs.bold.has(c), `bold 缺 ${c}`);
 });
 
-test('extractCharsets: 非汉字符号并入 bold/sans', () => {
+test('extractCharsets: 非汉字符号并入 bold', () => {
   const cs = extractCharsets([{ name: 'OEBPS/Text/chapter0001.xhtml', text: '<p>正文，。！A1</p>' }]);
-  for (const c of '，。！A1') { assert.ok(cs.bold.has(c), `bold 缺符号 ${c}`); assert.ok(cs.sans.has(c), `sans 缺符号 ${c}`); }
+  for (const c of '，。！A1') assert.ok(cs.bold.has(c), `bold 缺符号 ${c}`);
 });
 ```
 
@@ -161,13 +160,11 @@ const BOOKS = path.resolve(import.meta.dirname, '../../books');
 export const SOURCE_FONTS = {
   serifRegular: path.join(BOOKS, 'source-han-serif-sc/SourceHanSerifSC-Regular.otf'),
   serifBold:    path.join(BOOKS, 'source-han-serif-sc/SourceHanSerifSC-Bold.otf'),
-  sansBold:     path.join(BOOKS, 'source-han-sans-sc/SourceHanSansSC-Bold.otf'),
 };
 
 export const NEW_FONTS = [
   { role: 'regular', file: 'SourceHanSerifSC-Regular.subset.otf', family: 'Source Han Serif SC',      weight: null },
   { role: 'bold',    file: 'SourceHanSerifSC-Bold.subset.otf',    family: 'Source Han Serif SC Bold', weight: 700 },
-  { role: 'sans',    file: 'SourceHanSansSC-Bold.subset.otf',     family: 'Source Han Sans SC Bold',  weight: 700 },
 ];
 
 const stripTags = (html) => html.replace(/<[^>]+>/g, ' ').replace(/&[a-z]+;/g, ' ');
@@ -177,17 +174,16 @@ const isHan = (c) => /\p{Script=Han}/u.test(c);
 export function extractCharsets(xhtmlList) {
   const regular = new Set();
   const bold = new Set();
-  const sans = new Set();
   for (const { name, text } of xhtmlList) {
     addChars(regular, stripTags(text));
-    for (const m of text.matchAll(/<h3\b[^>]*>([\s\S]*?)<\/h3>/gi)) addChars(bold, stripTags(m[1]));
+    // h3(章节标题)/h4(=ch1 分隔标题，实为粗宋)/目录/.cut/.ch1 全归 bold
+    for (const m of text.matchAll(/<h[34]\b[^>]*>([\s\S]*?)<\/h[34]>/gi)) addChars(bold, stripTags(m[1]));
+    for (const m of text.matchAll(/<[^>]*class="[^"]*\b(?:cut|ch1)\b[^"]*"[^>]*>([\s\S]*?)<\/[a-z0-9]+>/gi)) addChars(bold, stripTags(m[1]));
     if (/\/(TOC|navigation-documents)\.xhtml$/i.test(name)) addChars(bold, stripTags(text));
-    for (const m of text.matchAll(/<h4\b[^>]*>([\s\S]*?)<\/h4>/gi)) addChars(sans, stripTags(m[1]));
-    for (const m of text.matchAll(/<[^>]*class="[^"]*\b(?:cut|ch1)\b[^"]*"[^>]*>([\s\S]*?)<\/[a-z0-9]+>/gi)) addChars(sans, stripTags(m[1]));
   }
   const symbols = [...regular].filter((c) => !isHan(c));
-  for (const c of symbols) { bold.add(c); sans.add(c); }
-  return { regular, bold, sans };
+  for (const c of symbols) bold.add(c);
+  return { regular, bold };
 }
 ```
 
@@ -200,7 +196,7 @@ Expected: PASS（2 个 extractCharsets 测试）。
 
 ```bash
 git add src/core/font-subset.js test/unit/yimei-seikatsu/font-subset.test.js
-git commit -m "feat(font-subset): 字符集按部位提取（regular/bold/sans）"
+git commit -m "feat(font-subset): 字符集按部位提取（regular/bold）"
 ```
 
 ---
@@ -234,11 +230,10 @@ test('rewriteCss: 删旧 @font-face、加 3 新、family 重映射、删孤儿�
   // 新 3 @font-face
   assert.ok(out.includes('SourceHanSerifSC-Regular.subset.otf'), '缺新 Regular @font-face');
   assert.ok(out.includes('SourceHanSerifSC-Bold.subset.otf'), '缺新 Bold @font-face');
-  assert.ok(out.includes('SourceHanSansSC-Bold.subset.otf'), '缺新 Sans @font-face');
   // family 重映射
   assert.match(out, /body\{font-family:"Source Han Serif SC"\}/);
   assert.match(out, /h3\{font-family:"Source Han Serif SC Bold"\}/);
-  assert.match(out, /\.cut\{font-family:"Source Han Sans SC Bold"\}/);
+  assert.match(out, /\.cut\{font-family:"Source Han Serif SC Bold"\}/);
   assert.match(out, /\.toc a\{font-family:"Source Han Serif SC Bold"\}/);
   // 孤儿 .illus1 的 font-family 删除
   assert.ok(!/illus1;|font-family:illus1/.test(out), '.illus1 孤儿 font-family 应删');
@@ -259,18 +254,15 @@ Expected: FAIL（`rewriteCss` 未定义）。
 ```js
 const FAMILY_OF = {
   main: 'serif', ch3: 'serif', sum: 'serif', mes: 'serif', note: 'serif', cont: 'serif', int: 'serif', title: 'serif',
-  ch2: 'serifBold', ctt1: 'serifBold', ctt2: 'serifBold',
-  ch1: 'sans',
+  ch2: 'serifBold', ctt1: 'serifBold', ctt2: 'serifBold', ch1: 'serifBold',
 };
 const FAMILY_NAME = {
   serif: '"Source Han Serif SC"',
   serifBold: '"Source Han Serif SC Bold"',
-  sans: '"Source Han Sans SC Bold"',
 };
 const NEW_FONTFACE =
   '@font-face{font-family:"Source Han Serif SC";src:url(../Fonts/SourceHanSerifSC-Regular.subset.otf);}' +
-  '@font-face{font-family:"Source Han Serif SC Bold";font-weight:700;src:url(../Fonts/SourceHanSerifSC-Bold.subset.otf);}' +
-  '@font-face{font-family:"Source Han Sans SC Bold";font-weight:700;src:url(../Fonts/SourceHanSansSC-Bold.subset.otf);}';
+  '@font-face{font-family:"Source Han Serif SC Bold";font-weight:700;src:url(../Fonts/SourceHanSerifSC-Bold.subset.otf);}';
 
 export function rewriteCss(cssText) {
   // 1. 删所有旧 @font-face 块
@@ -356,7 +348,6 @@ export async function subsetAll(charsets, sources = SOURCE_FONTS) {
   return {
     regular: await subsetOne(sources.serifRegular, charsets.regular),
     bold: await subsetOne(sources.serifBold, charsets.bold),
-    sans: await subsetOne(sources.sansBold, charsets.sans),
   };
 }
 
@@ -521,7 +512,7 @@ node bin/cli.js migrate-translation \
   --ref "/Users/liuzhuo/Downloads/资源/义妹生活/[三河ごーすと].义妹生活.07.[台简].epub" \
   --out /tmp/yimei09-newfont.epub
 ```
-Expected: 生成成功，`/tmp/yimei09-newfont.epub` 的 OEBPS/Fonts 只含 3 个思源子集 otf。
+Expected: 生成成功，`/tmp/yimei09-newfont.epub` 的 OEBPS/Fonts 只含 2 个思源子集 otf。
 
 - [ ] **Step 2: 校验产物零缺字（标题/目录/正文）**
 
@@ -529,7 +520,7 @@ Run（用项目已有审计手法对新产物检查；缺字应为 0）：
 ```bash
 node /tmp/coverage-audit-newfont.mjs   # 见下方脚本
 ```
-脚本 `/tmp/coverage-audit-newfont.mjs`：解开 `/tmp/yimei09-newfont.epub`，按 h3→bold子集 / body→regular子集 / .cut→sans子集 校验各部位用字在对应思源子集字体里 `charToGlyphIndex !== 0`。Expected: 各部位缺字 0。
+脚本 `/tmp/coverage-audit-newfont.mjs`：解开 `/tmp/yimei09-newfont.epub`，按 h3/h4/.cut→bold子集 / body→regular子集 校验各部位用字在对应思源子集字体里 `charToGlyphIndex !== 0`。Expected: 各部位缺字 0。
 
 - [ ] **Step 3: 重新生成 golden manifest**
 
@@ -583,7 +574,7 @@ node bin/cli.js hyread-to-simple --source "output/hyread/[三河ごーすと].�
   --out "output/simple/[三河ごーすと].义妹生活.13.[台简].epub" --volume 13 --no-include-specials --credit-name 嘻嘻嘻
 ```
 > 注：以上命令形态取自 `src/entries/hyread-to-simple.js` 头部 usage 与 `lightnovel-html-simple-batch.js:runBatch`；若 13 卷上次是经 batch 产出，可改为给 `runBatch` 传 `volumes:['11','12','13']`。
-Expected: 6 个 epub 重新生成到 `output/simple/`，各自 OEBPS/Fonts 只含 3 个思源子集 otf。
+Expected: 6 个 epub 重新生成到 `output/simple/`，各自 OEBPS/Fonts 只含 2 个思源子集 otf。
 
 - [ ] **Step 3: 覆盖审计 7 个成品（含 09）**
 
@@ -628,4 +619,4 @@ git add -A && git commit -m "chore: 字体开源化产物审计脚本" || echo "
 
 **Placeholder scan：** Task 8 Step 2 的逐卷生成命令与 Task 7 Step 3 的 golden 脚本传参，需执行者对照上次生成 `output/simple` 的真实命令补全（命令形态已给，仅参数因历史命令而定）。其余步骤含完整代码。
 
-**Type consistency：** `extractCharsets`→`{regular,bold,sans}`、`subsetAll`→`{regular,bold,sans}`、`NEW_FONTS[].role` 三处 role 名一致；`applyToFiles`/`applyToDir` 同签名风格；`FAMILY_OF`/`FAMILY_NAME` token 与 spec 映射表一致。
+**Type consistency：** `extractCharsets`→`{regular,bold}`、`subsetAll`→`{regular,bold}`、`NEW_FONTS[].role` 两处 role 名一致；`applyToFiles`/`applyToDir` 同签名风格；`FAMILY_OF`/`FAMILY_NAME` token 与 spec 映射表一致。

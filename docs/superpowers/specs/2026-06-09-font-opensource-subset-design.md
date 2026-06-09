@@ -36,29 +36,28 @@
 | 目录条目 `.toc a` / `.ctt1` | ctt1 | 粗宋 serif | ≈ 思源宋 Bold 700 |
 | 目录大标题 `.ctt` / `.ctt2` / `.toc .ctit` | ctt2 | 粗宋（英文为主） | 思源宋 Bold 700 |
 | 副标题 `h5` / `.ch3` | ch3 | 常规宋 serif | 思源宋 Regular 400 |
-| 章节内分隔标题 `.cut` / `h4` / `.ch1` | ch1 | **黑体 sans** | 思源黑 Bold（待下载定稿，Medium/Bold 间） |
+| 章节内分隔标题 `.cut` / `h4` / `.ch1` | ch1 | 粗宋 serif（高清核实修正，曾误判黑体） | 思源宋 Bold 700 |
 | 简介 `.summary` / `.sum` | sum | 常规宋 serif | 思源宋 Regular 400 |
 | 消息 `.message` / `.mes` | mes | 常规宋 serif | 思源宋 Regular 400 |
 | 注释 `.note` / `.duokan-footnote-item` | note | 常规宋 serif | 思源宋 Regular 400 |
 | 正文 `body` / `ruby>rt` / `.main` | main | 常规宋 serif | 思源宋 Regular 400 |
 
-唯一 sans 部位为 ch1（黑体分隔标题），其余均为宋体。
+经高清同字核实，9 个部位**全为宋体**（ch1 在低清下曾误判为黑体，现已修正）。因此只需思源宋 Regular + Bold 两个字重，**不使用思源黑体**。
 
 ## 方案：字体层重构（真实思源命名 + 归并 + 彻底清理）
 
-### ① 归并为 3 个真实命名思源字体（每卷各自子集化）
+### ① 归并为 2 个真实命名思源字体（每卷各自子集化）
 
 | 新字体文件 | CSS font-family | 源字重 | 接管部位 |
 |---|---|---|---|
 | `SourceHanSerifSC-Regular.subset.otf` | `"Source Han Serif SC"` | 思源宋 Regular | 正文 body、ruby、h5/ch3、简介、消息、注释 |
-| `SourceHanSerifSC-Bold.subset.otf` | `"Source Han Serif SC Bold"` | 思源宋 Bold | 章节标题 h3/ch2、目录 ctt1/ctt2 |
-| `SourceHanSansSC-Bold.subset.otf` | `"Source Han Sans SC Bold"` | 思源黑 Bold | 黑体分隔标题 ch1/.cut/h4 |
+| `SourceHanSerifSC-Bold.subset.otf` | `"Source Han Serif SC Bold"` | 思源宋 Bold | 章节标题 h3/ch2、目录 ctt1/ctt2、分隔标题 ch1/.cut/h4 |
 
 用**独立 family 名**（而非同名 + font-weight），规避老阅读器字重匹配不一致。family 名仍同时设 `font-weight` 作双保险。
 
 ### ② CSS 完整重映射
 
-- 新增 3 条 @font-face（指向上表 3 个子集字体），**删除旧全部 @font-face**（09 卷 12 条 / 11 卷 9 条）。
+- 新增 2 条 @font-face（指向上表 2 个子集字体），**删除旧全部 @font-face**（09 卷 12 条 / 11 卷 9 条）。
 - 所有选择器的 `font-family` 改为真实思源 family 名（按上表归属）。
 - fallback 链尾的 `,emoji,sym` 去掉（已验证无用）。
 
@@ -81,16 +80,15 @@
 
 - 该字体接管的所有部位的**实际用字并集**（从该卷文本扫描，按已确认的字体绑定）。
   - 宋 Regular 子集 ≈ 正文全字（约 2000+）＋ 副标题/简介/消息/注释用字。
-  - 宋 Bold 子集 ≈ 标题＋目录用字（约几十~上百）。
-  - 黑 Bold 子集 ≈ 黑体分隔标题用字（少量）。
+  - 宋 Bold 子集 ≈ 标题＋目录＋分隔标题（ch1）用字（约几十~上百）。
 - **全书用到的标点 / 全角符号 / 拉丁字母 / 数字**全集（确保移除 emoji/sym 后零缺符号）。
 
 ### 工具与模块
 
 - 子集化工具：`subset-font`（harfbuzz 内核）。思源为 CFF/OTF outline，子集输出保持 CFF → 文件用 `.otf` 扩展名，OPF `media-type` 用 `font/otf`（或 `application/vnd.ms-opentype`）。
 - 新增共享模块 `src/core/font-subset.js`：
-  - 输入：epub 各部位用字映射 + 3 个思源源字体路径。
-  - 输出：3 个子集字体 ＋ 重写后的 `necessary.css` / `default.css`。
+  - 输入：epub 各部位用字映射 + 2 个思源源字体路径（宋 Regular/Bold）。
+  - 输出：2 个子集字体 ＋ 重写后的 `necessary.css` / `default.css`。
   - 职责：扫用字 → 子集化 → 写新字体 → 重构 CSS（新 @font-face + 选择器重映射 + 删孤儿）→ 删旧字体文件 → 更新 OPF manifest。
 
 ### 集成进两条管线
@@ -101,15 +99,15 @@
 ## 影响面
 
 1. ＋依赖 `subset-font`。
-2. ＋资产 `books/source-han-sans-sc/`（思源黑体，下载 Regular/Medium/Bold 用于定稿与子集）；Serif 已在 `books/source-han-serif-sc/`。
+2. 思源宋体 Serif 已在 `books/source-han-serif-sc/`（Regular/Bold 即用）；思源黑体虽已下载至 `books/source-han-sans-sc/`，但 ch1 修正为宋体后**不再使用**。
 3. ＋共享模块 `src/core/font-subset.js`，＋2 处管线集成。
 4. **e2e golden（09）**：`OEBPS/Fonts/*` 与 `OEBPS/Styles/*.css` 的 hash 全变 → 更新 `test/fixtures/yimei09/golden-manifest.json`（预期内变更）。
 5. **重新生成成品**：09×1 ＋ 11/12/13 各正文版&特典版×6 ＝ **7 个 epub**。
-6. **体积**：每卷字体约 1.3~1.7MB（宋 Regular 子集为主，标题/黑体子集极小），原约 0.9MB，略增；远小于全量内嵌（20MB+/卷）。
+6. **体积**：每卷字体约 1.3~1.7MB（宋 Regular 子集为主，宋 Bold 标题子集极小），原约 0.9MB，略增；远小于全量内嵌（20MB+/卷）。
 
 ## 实施顺序（细化交由 writing-plans）
 
-1. 下载思源黑体 SC（Regular/Medium/Bold）到 `books/source-han-sans-sc/`，用并排样张在 Medium/Bold 间定稿 ch1 字重。
+1. 思源宋体 Serif（Regular/Bold）已就位于 `books/source-han-serif-sc/`；ch1 经高清核实为粗宋体，归思源宋 Bold（无需黑体）。
 2. 加依赖 `subset-font`。
 3. 写 `src/core/font-subset.js`（扫用字 + 子集化 + CSS 重构 + 删旧字体 + 改 OPF）。
 4. 集成进 `migrate-epub.js`（09）。
@@ -122,8 +120,8 @@
 ## 验收标准
 
 1. 7 个成品的标题/目录/简介/正文用字，对应思源子集字体**零缺字**（coverage 脚本验证）。
-2. CSS 里只剩 3 个思源 @font-face，无任何旧字体名 / 孤儿引用。
-3. `OEBPS/Fonts/` 只有 3 个思源子集字体，无 emoji/sym/int 及旧字体。
+2. CSS 里只剩 2 个思源 @font-face，无任何旧字体名 / 孤儿引用。
+3. `OEBPS/Fonts/` 只有 2 个思源子集字体，无 emoji/sym/int 及旧字体。
 4. 全量测试（`npm test`）通过（golden 更新后）。
 5. 每卷字体体积 < 2MB。
 
@@ -136,6 +134,6 @@
 
 ## 待确认/风险
 
-- **ch1 黑体字重**：当前评估 Bold 700，实施第 1 步下载思源黑体后用并排法在 Medium(500)/Bold(700) 间最终定稿。
+- **ch1 已定稿**：高清核实 ch1 为粗宋体（非黑体），归思源宋 Bold 700，与章节标题/目录同字体；思源黑体不使用。
 - **subset-font 对 CFF 的输出**：确认输出 OTF(CFF) 且阅读器（多看/各 epub reader）兼容；必要时回退为转 TrueType glyf。
 - **独立 family 名兼容性**：以 family 名区分字重，避免 weight 匹配问题；同时保留 font-weight 声明。
