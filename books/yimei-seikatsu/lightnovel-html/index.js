@@ -203,7 +203,7 @@ function renderBlocks(blocks, state = null) {
 function renderChapterXhtml(chapter, { rubyAnnotations = [] } = {}) {
   const [mainTitle, subtitle] = splitHeading(chapter.title);
   const heading = [
-    ` <h4>${escapeXml(mainTitle)}</h4>`,
+    ` <h3>${escapeXml(mainTitle)}</h3>`,
     subtitle ? ` <h5>${escapeXml(subtitle)}</h5>` : null,
   ].filter(Boolean).join('\n');
 
