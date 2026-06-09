@@ -32,3 +32,32 @@ export function extractCharsets(xhtmlList) {
   for (const c of symbols) bold.add(c);
   return { regular, bold };
 }
+
+const FAMILY_OF = {
+  main: 'serif', ch3: 'serif', sum: 'serif', mes: 'serif', note: 'serif', cont: 'serif', int: 'serif', title: 'serif',
+  ch2: 'serifBold', ctt1: 'serifBold', ctt2: 'serifBold', ch1: 'serifBold',
+};
+const FAMILY_NAME = {
+  serif: '"Source Han Serif SC"',
+  serifBold: '"Source Han Serif SC Bold"',
+};
+const NEW_FONTFACE =
+  '@font-face{font-family:"Source Han Serif SC";src:url(../Fonts/SourceHanSerifSC-Regular.subset.otf);}' +
+  '@font-face{font-family:"Source Han Serif SC Bold";font-weight:700;src:url(../Fonts/SourceHanSerifSC-Bold.subset.otf);}';
+
+export function rewriteCss(cssText) {
+  // 1. 删所有旧 @font-face 块
+  let css = cssText.replace(/@font-face\s*\{[^}]*\}/g, '');
+  // 2. 重映射 font-family 声明
+  css = css.replace(/font-family\s*:\s*([^;}]+)([;}])/g, (m, value, end) => {
+    const first = value.split(',')[0].trim().replace(/["']/g, '').split(/\s/)[0];
+    if (first === 'initial' || first === 'inherit') return m;
+    if (FAMILY_OF[first]) return `font-family:${FAMILY_NAME[FAMILY_OF[first]]}${end}`;
+    // 孤儿（illus*/num/emoji/sym/未知）：删除该声明
+    return end === ';' ? '' : end;
+  });
+  // 3. 去掉块内最后声明多余的分号（;}  →  }）以规范化输出
+  css = css.replace(/;}/g, '}');
+  // 4. 头部插入 2 个新 @font-face
+  return NEW_FONTFACE + css;
+}
