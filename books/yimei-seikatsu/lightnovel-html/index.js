@@ -4,6 +4,7 @@ import * as OpenCC from 'opencc-js';
 import { parseHTML } from 'linkedom';
 
 import { readEpub, writeEpub } from '../../../src/core/zip-io.js';
+import { applyToFiles } from '../../../src/core/font-subset.js';
 import { buildSteraFootnote, selfCloseVoidTags } from '../../../src/core/stages/footnote-fix.js';
 
 const toSimplified = OpenCC.Converter({ from: 'tw', to: 'cn' });
@@ -400,6 +401,7 @@ function mediaTypeFor(name, contentType = '') {
   if (name.endsWith('.css')) return 'text/css';
   if (name.endsWith('.js')) return 'application/javascript';
   if (name.endsWith('.ttf')) return 'font/ttf';
+  if (name.endsWith('.otf')) return 'font/otf';
   if (name.endsWith('.ncx')) return 'application/x-dtbncx+xml';
   return 'application/octet-stream';
 }
@@ -808,7 +810,7 @@ ${summaryGuide}    <reference type="text" title="题记" href="Text/pre.xhtml"/>
 }
 
 export function simplifyText(input) {
-  return toSimplified(String(input));
+  return toSimplified(String(input)).replace(/∼/g, '～');
 }
 
 export function extractArticleHtml(html) {
@@ -1192,6 +1194,9 @@ export async function buildLightNovelEpubFromBook(book, {
       properties: image.id === 'cover' ? 'cover-image' : null,
     });
   }
+
+  // 字体开源化：删旧子集字体、写思源子集、重写 CSS（manifest 随后扫描自动反映）
+  await applyToFiles(files);
 
   const copiedItems = Object.keys(files)
     .filter((name) => name.startsWith('OEBPS/Fonts/') || name.startsWith('OEBPS/Styles/') || name.startsWith('OEBPS/Misc/'))
