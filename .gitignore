@@ -24,4 +24,7 @@ archive/scripts-py/.venv/
 .vscode/
 .idea/
 *.swp
+
+# 字体源资产（大体积二进制，本地构建输入，不入 git；子集化产物随 EPUB 输出）
 books/source-han-serif-sc/
+books/source-han-sans-sc/
