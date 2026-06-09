@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { extractCharsets, rewriteCss } from '../../../src/core/font-subset.js';
+import { extractCharsets, rewriteCss, applyToFiles, NEW_FONTS } from '../../../src/core/font-subset.js';
+import * as opentype from '../../../node_modules/opentype.js/dist/opentype.mjs';
 
 test('extractCharsets: regular 收全字符，bold 收 h3/h4/目录/.cut', () => {
   const xhtmlList = [
@@ -42,4 +43,23 @@ test('rewriteCss: 删旧 @font-face、加 2 新、family 重映射、删孤儿�
   assert.ok(!/illus1;|font-family:illus1/.test(out), '.illus1 孤儿 font-family 应删');
   assert.match(out, /font-family:initial/);
   assert.ok(!/emoji|sym/.test(out.replace(/Source Han[^"]*/g, '')), 'emoji/sym fallback 应去除');
+});
+
+test('applyToFiles: 删旧字体、写 2 思源子集、重写 CSS，且标题字零缺', async () => {
+  const files = {
+    'OEBPS/Text/chapter0001.xhtml': Buffer.from('<h3>序幕假日</h3><p>正文甲乙丙</p>'),
+    'OEBPS/Text/TOC.xhtml': Buffer.from('<h3 class="ctt">目录</h3><a href="x">序幕假日</a>'),
+    'OEBPS/Fonts/ch2.ttf': Buffer.from('OLD'),
+    'OEBPS/Fonts/main.ttf': Buffer.from('OLD'),
+    'OEBPS/Styles/necessary.css': Buffer.from('@font-face{font-family:"ch2";src:url(../Fonts/ch2.ttf);}h3{font-family:ch2,emoji,sym;}body{font-family:main,emoji,sym;}'),
+  };
+  await applyToFiles(files);
+  assert.ok(!files['OEBPS/Fonts/ch2.ttf'] && !files['OEBPS/Fonts/main.ttf'], '旧字体应删');
+  const boldFile = `OEBPS/Fonts/${NEW_FONTS.find(f=>f.role==='bold').file}`;
+  const regFile = `OEBPS/Fonts/${NEW_FONTS.find(f=>f.role==='regular').file}`;
+  assert.ok(files[boldFile] && files[regFile], '应写入新思源子集字体');
+  assert.match(files['OEBPS/Styles/necessary.css'].toString(), /Source Han Serif SC Bold/);
+  const b = files[boldFile];
+  const f = opentype.parse(b.buffer.slice(b.byteOffset, b.byteOffset+b.byteLength));
+  for (const c of '序幕假日目录') assert.notStrictEqual(f.charToGlyphIndex(c), 0, `bold 子集缺字 ${c}`);
 });

@@ -45,6 +45,56 @@ const NEW_FONTFACE =
   '@font-face{font-family:"Source Han Serif SC";src:url(../Fonts/SourceHanSerifSC-Regular.subset.otf);}' +
   '@font-face{font-family:"Source Han Serif SC Bold";font-weight:700;src:url(../Fonts/SourceHanSerifSC-Bold.subset.otf);}';
 
+async function subsetOne(srcPath, set) {
+  if (!set.size) return null;
+  const buf = fs.readFileSync(srcPath);
+  return subsetFont(buf, [...set].join(''), { targetFormat: 'sfnt' });
+}
+
+export async function subsetAll(charsets, sources = SOURCE_FONTS) {
+  return {
+    regular: await subsetOne(sources.serifRegular, charsets.regular),
+    bold: await subsetOne(sources.serifBold, charsets.bold),
+  };
+}
+
+const FONTS_RE = /(^|\/)OEBPS\/Fonts\//;
+const CSS_RE = /OEBPS\/Styles\/.*\.css$/;
+const XHTML_RE = /OEBPS\/Text\/.*\.xhtml$/;
+
+export async function applyToFiles(files, sources = SOURCE_FONTS) {
+  const xhtmlList = Object.keys(files)
+    .filter((n) => XHTML_RE.test(n))
+    .map((n) => ({ name: n, text: files[n].toString('utf8') }));
+  const fonts = await subsetAll(extractCharsets(xhtmlList), sources);
+  for (const n of Object.keys(files)) if (FONTS_RE.test(n)) delete files[n];
+  for (const def of NEW_FONTS) {
+    if (fonts[def.role]) files[`OEBPS/Fonts/${def.file}`] = fonts[def.role];
+  }
+  for (const n of Object.keys(files)) if (CSS_RE.test(n)) files[n] = Buffer.from(rewriteCss(files[n].toString('utf8')));
+  return fonts;
+}
+
+export async function applyToDir(oebpsDir, sources = SOURCE_FONTS) {
+  const textDir = path.join(oebpsDir, 'Text');
+  const fontsDir = path.join(oebpsDir, 'Fonts');
+  const stylesDir = path.join(oebpsDir, 'Styles');
+  const xhtmlList = fs.readdirSync(textDir)
+    .filter((f) => f.endsWith('.xhtml'))
+    .map((f) => ({ name: `OEBPS/Text/${f}`, text: fs.readFileSync(path.join(textDir, f), 'utf8') }));
+  const fonts = await subsetAll(extractCharsets(xhtmlList), sources);
+  for (const f of fs.readdirSync(fontsDir)) fs.rmSync(path.join(fontsDir, f));
+  for (const def of NEW_FONTS) {
+    if (fonts[def.role]) fs.writeFileSync(path.join(fontsDir, def.file), fonts[def.role]);
+  }
+  for (const f of fs.readdirSync(stylesDir)) {
+    if (!f.endsWith('.css')) continue;
+    const p = path.join(stylesDir, f);
+    fs.writeFileSync(p, rewriteCss(fs.readFileSync(p, 'utf8')), 'utf8');
+  }
+  return fonts;
+}
+
 export function rewriteCss(cssText) {
   // 1. 删所有旧 @font-face 块
   let css = cssText.replace(/@font-face\s*\{[^}]*\}/g, '');
