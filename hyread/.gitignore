@@ -1,0 +1,6 @@
+# HyRead 中间资源（体积大、可由流程重新生成，不入库）
+# 成品落项目根 output/hyread/（epub-clean-js 仓库外，天然不入库，与 healed/translated/clean 一致）
+work/*/
+
+# 保留占位
+!work/.gitkeep

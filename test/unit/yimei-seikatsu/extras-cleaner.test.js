@@ -110,6 +110,29 @@ test('buildMessageXhtml: 含 credit + url + logo', () => {
   assert.ok(html.includes('zy-enlarge-src="none"'));
 });
 
+test('buildMessageXhtml: 可搬运 07 制作信息并移除图源/录入', () => {
+  const html = buildMessageXhtml(
+    [
+      ['作者', '三河ごーすと'],
+      ['插画', 'Hiten'],
+      ['译者', 'Seeker'],
+    ],
+    {
+      groupHtml:
+        '    <p><a href="https://www.lightnovel.us">轻之国度录入组</a>×<a href="https://www.voidlord.com">虚空文学旅团</a></p>',
+      logo: 'logo.webp',
+    },
+  );
+  assert.ok(html.includes('<div class="message">'));
+  assert.ok(html.includes('<p>Seeker</p>'));
+  assert.ok(html.includes('轻之国度录入组'));
+  assert.ok(html.includes('虚空文学旅团'));
+  assert.equal((html.match(/<div class="creator">/g) || []).length, 3);
+  assert.ok(!html.includes('<p>图源</p>'));
+  assert.ok(!html.includes('<p>录入</p>'));
+  assert.ok(!html.includes('仅供个人学习交流使用'));
+});
+
 test('buildMessageXhtml: 与 golden-py 一致', async () => {
   const golden = await readFile(resolve(FIXTURES, 'message.xhtml'), 'utf8');
   const credits = [

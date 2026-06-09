@@ -10,10 +10,10 @@ import { readFile, rm, mkdir, readdir } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
 
-const FIXTURE_IN = "/Users/liuzhuo/Downloads/义妹生活/test_footnote_epubs/V3-duokan-minimal.epub";
 const OUT = "/tmp/footnote-fix-e2e.epub";
 const UNPACK = "/tmp/footnote-fix-e2e-unpacked";
 const PROJECT_ROOT = path.resolve(import.meta.dirname, "../..");
+const FIXTURE_IN = path.join(PROJECT_ROOT, "test/fixtures/footnote_epubs/V3-duokan-minimal.epub");
 
 function run(cmd, args, opts = {}) {
   return new Promise((resolve, reject) => {

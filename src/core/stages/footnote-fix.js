@@ -56,6 +56,24 @@ function escapeText(s) {
     .replace(/'/g, '&#x27;');
 }
 
+// linkedom 的 document.toString() 把 void 元素序列化成 HTML5 风格（无斜杠：
+// <link ...> / <img ...> / <br>），多看/掌阅宽松解析不在意，但 Apple Books 等
+// 严格 XML 解析器（libxml2）会在 </head> 等处报 "Opening and ending tag mismatch"。
+// 这里把 void 元素统一补成自闭合，保证输出是合法 XHTML。
+//
+// 正则用 (?:[^>"']|"[^"]*"|'[^']*')*? 匹配属性段，可正确跳过引号内的 > 字符。
+// 幂等：已自闭合的 <img .../> 不受影响。
+const VOID_TAGS = 'area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr';
+const VOID_TAG_RE = new RegExp(
+  `<(${VOID_TAGS})\\b((?:[^>"']|"[^"]*"|'[^']*')*?)\\s*/?>`,
+  'gi',
+);
+
+export function selfCloseVoidTags(html) {
+  if (html == null) return html;
+  return String(html).replace(VOID_TAG_RE, (_match, tag, attrs) => `<${tag}${attrs}/>`);
+}
+
 /**
  * 构建 V8 多端兼容的 STERA 注释结构。
  *
@@ -267,7 +285,7 @@ export function upgradeFootnotes(xhtml, opts = {}) {
   if (xmlDecl) prefix = xmlDecl[0];
   else prefix = '<?xml version="1.0" encoding="utf-8"?>\n';
 
-  return prefix + document.toString();
+  return prefix + selfCloseVoidTags(document.toString());
 }
 
 /**

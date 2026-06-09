@@ -11,6 +11,10 @@ const entries = {
   "all":                 "../src/entries/all.js",
   "migrate-translation": "../src/entries/migrate-translation.js",
   "footnote-fix":        "../src/entries/footnote-fix.js",
+  "lightnovel-html-to-epub": "../src/entries/lightnovel-html-to-epub.js",
+  "lightnovel-html-simple-batch": "../src/entries/lightnovel-html-simple-batch.js",
+  "build-yimei-simple": "../src/entries/lightnovel-html-simple-batch.js",
+  "hyread-to-simple":            "../src/entries/hyread-to-simple.js",
 };
 
 if (!cmd || cmd === "--help" || cmd === "-h") {
@@ -25,6 +29,6 @@ if (!entries[cmd]) {
   process.exit(2);
 }
 
-process.argv = ["node", entries[cmd], ...argv];
 const mod = path.resolve(import.meta.dirname, entries[cmd]);
+process.argv = ["node", mod, ...argv];
 await import(mod);

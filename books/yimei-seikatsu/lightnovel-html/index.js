@@ -291,6 +291,10 @@ function renderPreXhtml(book) {
 }
 
 function renderTocXhtml(tocEntries) {
+  const style = 'body{-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none;}'
+    + '.ctt{font-family:ctt2,emoji,sym;text-align:center;font-size:1.8em;margin:1em 0;font-weight:bold;}'
+    + '.toc{margin:1em 0 0.5em;text-align:center;border-left:0;}'
+    + '.toc a{display:block;font-family:ctt1,emoji,sym;padding:0.25em;}';
   const rows = tocEntries
     .map((entry) => ` <div class="toc">
   <a href="${escapeXml(path.posix.basename(entry.href))}">
@@ -298,7 +302,20 @@ function renderTocXhtml(tocEntries) {
   </a>
  </div>`)
     .join('\n');
-  return xhtml('目录', ` <h3 class="ctt">CONTENTS</h3>\n${rows}`);
+  return '<?xml version="1.0" encoding="utf-8"?>\n'
+    + '<!DOCTYPE html>\n'
+    + '<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="zh" xmlns:epub="http://www.idpf.org/2007/ops" xmlns:xml="http://www.w3.org/XML/1998/namespace">\n'
+    + '<head>\n <title>目录</title>\n'
+    + ' <link href="../Styles/stylesheet.css" type="text/css" rel="stylesheet"/>\n'
+    + ' <script type="text/javascript" src="../Misc/script.js"></script>\n'
+    + ` <style>\n ${style}\n </style>\n`
+    + '</head>\n'
+    + '<body>\n'
+    + '<div style="margin:0 auto;width:fit-content;">\n'
+    + ` <h3 class="ctt">CONTENTS</h3>\n${rows}\n`
+    + '</div>\n'
+    + '</body>\n'
+    + '</html>';
 }
 
 function renderNavXhtml(entries, { hasSummary = false } = {}) {
@@ -1037,7 +1054,10 @@ export async function buildLightNovelEpubFromBook(book, {
   const files = {};
 
   for (const name of ref.names) {
-    if (isCopiedAsset(name)) files[name] = ref.entries[name];
+    // 字体从 styleRef 取（日翻版），不从 ref 复制 — 避免 ref 独有的字体残留
+    if (isCopiedAsset(name) && !name.startsWith('OEBPS/Fonts/')) {
+      files[name] = ref.entries[name];
+    }
   }
   if (styleRef) {
     for (const name of styleRef.names) {

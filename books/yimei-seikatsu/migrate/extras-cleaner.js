@@ -93,7 +93,18 @@ const TITLE_TEMPLATE = (t1, t2, t3, t4) =>
 </html>
 `;
 
-const MESSAGE_TEMPLATE = (creditRows, url, logo) =>
+const DEFAULT_MESSAGE_URL = 'https://www.lightnovel.us';
+const DEFAULT_MESSAGE_LOGO = 'logo.webp';
+
+const DEFAULT_MESSAGE_GROUP = (url) =>
+  `    <a href="${url}">
+    <p style="padding:0 0 0.5em;color:#D11A2D;">仅供个人学习交流使用，禁作商业用途</p>
+    </a>
+    <a href="${url}">
+    <p style="color:#D11A2D;">下载后请在24小时内删除，制作组不负担任何责任</p>
+    </a>`;
+
+const MESSAGE_TEMPLATE = (creditRows, groupHtml, logo) =>
   `<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="zh" xmlns:epub="http://www.idpf.org/2007/ops">
@@ -111,12 +122,7 @@ const MESSAGE_TEMPLATE = (creditRows, url, logo) =>
    <div class="meghr"></div>
 ${creditRows}
    <div class="group">
-    <a href="${url}">
-    <p style="padding:0 0 0.5em;color:#D11A2D;">仅供个人学习交流使用，禁作商业用途</p>
-    </a>
-    <a href="${url}">
-    <p style="color:#D11A2D;">下载后请在24小时内删除，制作组不负担任何责任</p>
-    </a>
+${groupHtml}
    </div>
    <div class="logo">
     <img alt="logo" src="../Images/${logo}" zy-enlarge-src="none"/>
@@ -253,20 +259,36 @@ export function buildTitleXhtml(t1, t2, t3, t4) {
   return TITLE_TEMPLATE(t1, t2, t3, t4);
 }
 
+function resolveMessageOptions(urlOrOptions, logo) {
+  if (urlOrOptions && typeof urlOrOptions === 'object') {
+    const url = urlOrOptions.url ?? DEFAULT_MESSAGE_URL;
+    return {
+      groupHtml: urlOrOptions.groupHtml ?? DEFAULT_MESSAGE_GROUP(url),
+      logo: urlOrOptions.logo ?? DEFAULT_MESSAGE_LOGO,
+    };
+  }
+  const url = urlOrOptions ?? DEFAULT_MESSAGE_URL;
+  return {
+    groupHtml: DEFAULT_MESSAGE_GROUP(url),
+    logo: logo ?? DEFAULT_MESSAGE_LOGO,
+  };
+}
+
 /**
  * STERA 风格制作信息页。
  * @param {Array<[string, string]>} credits  [(role, name), ...]
- * @param {string} [url='https://www.lightnovel.us']
+ * @param {string | { url?: string, logo?: string, groupHtml?: string }} [urlOrOptions]
  * @param {string} [logo='logo.webp']
  * @returns {string}
  */
-export function buildMessageXhtml(credits, url = 'https://www.lightnovel.us', logo = 'logo.webp') {
+export function buildMessageXhtml(credits, urlOrOptions = DEFAULT_MESSAGE_URL, logo = DEFAULT_MESSAGE_LOGO) {
   const rows = [];
   for (const [role, name] of credits) {
     rows.push(`   <div class="creator">\n    <p>${escapeHtml(role)}</p>\n   </div>`);
     rows.push(`   <div>\n    <p>${escapeHtml(name)}</p>\n   </div>`);
   }
-  return MESSAGE_TEMPLATE(rows.join('\n'), url, logo);
+  const options = resolveMessageOptions(urlOrOptions, logo);
+  return MESSAGE_TEMPLATE(rows.join('\n'), options.groupHtml, options.logo);
 }
 
 /**

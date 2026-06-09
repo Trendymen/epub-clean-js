@@ -7,7 +7,7 @@ import shutil
 import zipfile
 from pathlib import Path
 
-OUT_DIR = Path("/Users/liuzhuo/Downloads/义妹生活/test_footnote_epubs")
+OUT_DIR = Path(__file__).resolve().parents[2] / "test/fixtures/footnote_epubs"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 NOTE_IMG = OUT_DIR / "note.webp"  # 多看私有 img 图标
 SCRIPT_JS = OUT_DIR / "script.js"  # 多看注释弹层逻辑（已拷自 DST）
