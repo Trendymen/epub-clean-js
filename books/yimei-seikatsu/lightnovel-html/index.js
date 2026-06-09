@@ -202,10 +202,9 @@ function renderBlocks(blocks, state = null) {
 
 function renderChapterXhtml(chapter, { rubyAnnotations = [] } = {}) {
   const [mainTitle, subtitle] = splitHeading(chapter.title);
-  const heading = [
-    ` <h3>${escapeXml(mainTitle)}</h3>`,
-    subtitle ? ` <h5>${escapeXml(subtitle)}</h5>` : null,
-  ].filter(Boolean).join('\n');
+  // 合并为单行 h3（匹配 healed 日翻版风格），有副标题时用全角空格连接
+  const merged = subtitle ? `${mainTitle}　${subtitle}` : mainTitle;
+  const heading = ` <h3>${escapeXml(merged)}</h3>`;
 
   const state = { counter: 1, asides: [], rubyAnnotations };
   const body = renderBlocks(chapter.blocks, state);
