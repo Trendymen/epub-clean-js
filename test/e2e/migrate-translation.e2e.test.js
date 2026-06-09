@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { hashFile } from "./_helpers/diff.js";
 
-const PROJ = "/Users/liuzhuo/Downloads/义妹生活";
+const PROJ = "/Users/liuzhuo/Downloads/资源/义妹生活";
 const SRC = `${PROJ}/义妹生活 - 09台简粗糙排版.epub`;
 const DST = `${PROJ}/[三河ごーすと].义妹生活.09.[日翻].epub`;
 const REF = `${PROJ}/[三河ごーすと].义妹生活.07.[台简].epub`;
