@@ -6,6 +6,7 @@ import { parseHTML } from 'linkedom';
 import { readEpub, writeEpub } from '../../../src/core/zip-io.js';
 import { applyToFiles } from '../../../src/core/font-subset.js';
 import { buildSteraFootnote, selfCloseVoidTags } from '../../../src/core/stages/footnote-fix.js';
+import { MESSAGE_DISCLAIMER_LINES } from '../migrate/extras-cleaner.js';
 
 const toSimplified = OpenCC.Converter({ from: 'tw', to: 'cn' });
 
@@ -274,7 +275,8 @@ function renderMessageXhtml(book, { logoFileName = null, creditOverrides = {} } 
    <div class="meghr"></div>
 ${bodyRows}
    <div class="group">
-    <p><a href="https://www.lightnovel.fun">轻之国度</a></p>
+    <p style="padding:0 0 0.5em;color:#D11A2D;">${MESSAGE_DISCLAIMER_LINES[0]}</p>
+    <p style="color:#D11A2D;">${MESSAGE_DISCLAIMER_LINES[1]}</p>
    </div>
 ${logo}
   </div>

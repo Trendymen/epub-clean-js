@@ -16,6 +16,7 @@ import {
   buildPreXhtml,
   buildTocXhtml,
 } from '../../../books/yimei-seikatsu/migrate/extras-cleaner.js';
+import { rewriteInlineStyles } from '../../../src/core/font-subset.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = resolve(
@@ -83,10 +84,11 @@ test('buildTitleXhtml: 4 个图片引用 + textbox 样式', () => {
   assert.ok(html.includes('<title>标题</title>'));
 });
 
-test('buildTitleXhtml: 与 golden-py 一致', async () => {
+test('buildTitleXhtml: 经字体内联重写后与 golden-py 一致', async () => {
+  // golden-py 是管线最终产物：builder 输出还要过 font-subset 的内联 <style> 重映射
   const golden = await readFile(resolve(FIXTURES, 'title.xhtml'), 'utf8');
   const generated = buildTitleXhtml('t1.webp', 't2.webp', 't3.webp', 't4.webp');
-  assert.equal(hash(generated), hash(golden));
+  assert.equal(hash(rewriteInlineStyles(generated)), hash(golden));
 });
 
 // ---------- message ----------
@@ -138,8 +140,7 @@ test('buildMessageXhtml: 与 golden-py 一致', async () => {
   const credits = [
     ['作者', '三河ごーすと'],
     ['插画', 'Hiten'],
-    ['译者', '幽蝉满耳'],
-    ['校对', '炫目林光'],
+    ['译者', 'Seeker'],
     ['图源', 'UU'],
     ['录入', 'coolbar'],
     ['嵌字', '闲的e书组'],
@@ -240,7 +241,7 @@ test('buildTocXhtml: 每个 entry 含 href + title', () => {
   assert.equal((html.match(/class="toc"/g) || []).length, 2);
 });
 
-test('buildTocXhtml: 与 golden-py 一致', async () => {
+test('buildTocXhtml: 经字体内联重写后与 golden-py 一致', async () => {
   const golden = await readFile(resolve(FIXTURES, 'TOC.xhtml'), 'utf8');
   const entries = [
     ['chapter0001.xhtml', '6月12日（星期六） 浅村悠太'],
@@ -260,5 +261,5 @@ test('buildTocXhtml: 与 golden-py 一致', async () => {
     ['special0003.xhtml', 'Animate特典4P小册子 『适合婚礼的月份』'],
   ];
   const generated = buildTocXhtml(entries);
-  assert.equal(hash(generated), hash(golden));
+  assert.equal(hash(rewriteInlineStyles(generated)), hash(golden));
 });

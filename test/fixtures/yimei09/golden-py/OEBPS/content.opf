@@ -20,7 +20,7 @@
 「相遇」至今一年，历经许多事而改变的两人，迎来高中生活最后的夏天。
 经历过友情、青春、新的相遇之后，「兄妹」所面对的感情是──
     ]]></dc:description>
-    <dc:identifier id="BookId">urn:uuid:1ecf00ce-ba63-4bb0-8c68-dfa0f84d2a94</dc:identifier>
+    <dc:identifier id="BookId">urn:uuid:05dd7231-2073-408c-91df-310ec1056f03</dc:identifier>
     <dc:subject>校园</dc:subject>
     <dc:subject>青春</dc:subject>
     <dc:subject>恋爱</dc:subject>
@@ -28,33 +28,21 @@
     <meta property="belongs-to-collection">义妹生活</meta>
     <meta property="group-position">9</meta>
     <meta name="cover" content="cover-image"/>
-    <meta property="dcterms:modified">2026-05-25T04:59:02Z</meta>
+    <meta property="dcterms:modified">2026-06-10T03:48:40Z</meta>
   </metadata>
   <manifest>
 
-    <item id="font_ch1" href="Fonts/ch1.ttf" media-type="font/ttf"/>
+    <item id="font_sourcehansanssc-regular_subset" href="Fonts/SourceHanSansSC-Regular.subset.otf" media-type="font/otf"/>
 
-    <item id="font_ch2" href="Fonts/ch2.ttf" media-type="font/ttf"/>
+    <item id="font_sourcehanserifsc-bold_subset" href="Fonts/SourceHanSerifSC-Bold.subset.otf" media-type="font/otf"/>
 
-    <item id="font_ch3" href="Fonts/ch3.ttf" media-type="font/ttf"/>
+    <item id="font_sourcehanserifsc-boldsub_subset" href="Fonts/SourceHanSerifSC-BoldSub.subset.otf" media-type="font/otf"/>
 
-    <item id="font_ctt1" href="Fonts/ctt1.ttf" media-type="font/ttf"/>
+    <item id="font_sourcehanserifsc-light_subset" href="Fonts/SourceHanSerifSC-Light.subset.otf" media-type="font/otf"/>
 
-    <item id="font_ctt2" href="Fonts/ctt2.ttf" media-type="font/ttf"/>
+    <item id="font_sourcehanserifsc-medium_subset" href="Fonts/SourceHanSerifSC-Medium.subset.otf" media-type="font/otf"/>
 
-    <item id="font_emoji" href="Fonts/emoji.ttf" media-type="font/ttf"/>
-
-    <item id="font_int" href="Fonts/int.ttf" media-type="font/ttf"/>
-
-    <item id="font_main" href="Fonts/main.ttf" media-type="font/ttf"/>
-
-    <item id="font_mes" href="Fonts/mes.ttf" media-type="font/ttf"/>
-
-    <item id="font_note" href="Fonts/note.ttf" media-type="font/ttf"/>
-
-    <item id="font_sum" href="Fonts/sum.ttf" media-type="font/ttf"/>
-
-    <item id="font_sym" href="Fonts/sym.ttf" media-type="font/ttf"/>
+    <item id="font_sourcehanserifsc-semibold_subset" href="Fonts/SourceHanSerifSC-SemiBold.subset.otf" media-type="font/otf"/>
 
     <item id="cover-image" href="Images/cover.jpg" media-type="image/jpeg" properties="cover-image"/>
 

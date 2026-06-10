@@ -8,7 +8,13 @@
  <script type="text/javascript" src="../Misc/script.js"></script>
 </head>
 <body>
- <h3>{{ title }}</h3>
+{% if headingParts -%}
+{% if headingParts.h4 %} <h4>{{ headingParts.h4 }}</h4>
+{% endif -%}
+{% if headingParts.h5 %} <h5>{{ headingParts.h5 }}</h5>
+{% endif -%}
+{% else %} <h3>{{ title }}</h3>
+{% endif -%}
 {% for b in blocks %}
 {% if b.para %}
  <p>{{ b.para|safe }}</p>

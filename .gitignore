@@ -11,6 +11,9 @@ node_modules/
 /tmp/
 *.bak
 
+# 临时调试/审计脚本（一次性，硬编码绝对路径，不入库）
+scripts/tmp-*.mjs
+
 # 程序产物（项目根 output/，含 translated/healed/clean 子目录）
 output/
 

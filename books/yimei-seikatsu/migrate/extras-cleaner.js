@@ -93,15 +93,22 @@ const TITLE_TEMPLATE = (t1, t2, t3, t4) =>
 </html>
 `;
 
-const DEFAULT_MESSAGE_URL = 'https://www.lightnovel.us';
+const DEFAULT_MESSAGE_URL = 'https://www.lightnovel.fun/';
 const DEFAULT_MESSAGE_LOGO = 'logo.webp';
+
+// 制作信息底部免责声明两行文案（09 与 11-13 共用，单点维护）。
+// 第一行带下边距，09 两行各包一个可点击 <a>，11-13 用纯文本（见 lightnovel-html）。
+export const MESSAGE_DISCLAIMER_LINES = [
+  '仅供个人学习交流使用，禁作商业用途',
+  '下载后请在24小时内删除，制作组不负担任何责任',
+];
 
 const DEFAULT_MESSAGE_GROUP = (url) =>
   `    <a href="${url}">
-    <p style="padding:0 0 0.5em;color:#D11A2D;">仅供个人学习交流使用，禁作商业用途</p>
+    <p style="padding:0 0 0.5em;color:#D11A2D;">${MESSAGE_DISCLAIMER_LINES[0]}</p>
     </a>
     <a href="${url}">
-    <p style="color:#D11A2D;">下载后请在24小时内删除，制作组不负担任何责任</p>
+    <p style="color:#D11A2D;">${MESSAGE_DISCLAIMER_LINES[1]}</p>
     </a>`;
 
 const MESSAGE_TEMPLATE = (creditRows, groupHtml, logo) =>

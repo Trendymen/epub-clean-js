@@ -1,6 +1,6 @@
 {
   "source": "[三河ごーすと].义妹生活.09.[台简].epub (Python 版, 引言修复后)",
-  "generated_at": "2026-05-25T04:59:20.560Z",
+  "generated_at": "2026-06-10T03:48:50.541Z",
   "files": {
     "META-INF/com.apple.ibooks.display-options.xml": {
       "sha256_normalized": "e0203d265e0663af016377911803447c9f5d3ad5d81a0dd0ffc5c79c83723d9e",
@@ -14,53 +14,29 @@
       "sha256_normalized": "506c9b4e6c8312d618ac3dc287c05747185e746422c3dc085c75b903ebcf404f",
       "bytes": 117
     },
-    "OEBPS/Fonts/ch1.ttf": {
-      "sha256_normalized": "dc822152d7f26894399e8b6ef724673771b81e6a538e2a092366cda8aef1ccd7",
-      "bytes": 9228
+    "OEBPS/Fonts/SourceHanSansSC-Regular.subset.otf": {
+      "sha256_normalized": "7fafd9bf0a153ceb04567c23547951032d7b3aef3c03ab993a95530aecd1e2bf",
+      "bytes": 1007632
     },
-    "OEBPS/Fonts/ch2.ttf": {
-      "sha256_normalized": "3d26235ceb9155c72d70f86d394bb1ebb2b2dbd1cd2fd30c391527423835ef4d",
-      "bytes": 8336
+    "OEBPS/Fonts/SourceHanSerifSC-Bold.subset.otf": {
+      "sha256_normalized": "10b083f5a1be5c0f676987ebfa1fd9f2f04eb7632318ca56a1217adf8b0b1684",
+      "bytes": 89024
     },
-    "OEBPS/Fonts/ch3.ttf": {
-      "sha256_normalized": "8f8554de7fe42137f039dfe0ff2550cd6c184065f2ac62c6cd4e61d34f658fb5",
-      "bytes": 7248
+    "OEBPS/Fonts/SourceHanSerifSC-BoldSub.subset.otf": {
+      "sha256_normalized": "4eadb1418ef137f3572adf886bc6ab3c899da8db8a3100b7c6b4dcb070c187bf",
+      "bytes": 89868
     },
-    "OEBPS/Fonts/ctt1.ttf": {
-      "sha256_normalized": "e82c373777dc28b711aa8cd7e6172fc522e50fc95ee3ec04331130f70f20b050",
-      "bytes": 13540
+    "OEBPS/Fonts/SourceHanSerifSC-Light.subset.otf": {
+      "sha256_normalized": "52e0eab4d8caeed20c3f615a63425a28ebcab62a4256da59864ac191e4ed8eba",
+      "bytes": 110968
     },
-    "OEBPS/Fonts/ctt2.ttf": {
-      "sha256_normalized": "5ee4ef56539781aa5a682d679c0027c9436c91a3b5453f56d07586cf86008293",
-      "bytes": 2404
+    "OEBPS/Fonts/SourceHanSerifSC-Medium.subset.otf": {
+      "sha256_normalized": "11ac4c83c74c1d155904964b3cfb4f83ed165ed24be42be255e0586a12f16468",
+      "bytes": 197932
     },
-    "OEBPS/Fonts/emoji.ttf": {
-      "sha256_normalized": "704fe58a7bfb0803660282ecb00547f6355a420d9041df4ac9c1ad1e7b42ef2d",
-      "bytes": 5312
-    },
-    "OEBPS/Fonts/int.ttf": {
-      "sha256_normalized": "5bd4249146258703c9783346e2b9a9de07b4b1d70a931634f6113bda609d673b",
-      "bytes": 3512
-    },
-    "OEBPS/Fonts/main.ttf": {
-      "sha256_normalized": "37dbe40dbeac6b9dc058615b0f55d4c4ab7f72476d50b2fd38e45be3fb83338d",
-      "bytes": 530288
-    },
-    "OEBPS/Fonts/mes.ttf": {
-      "sha256_normalized": "46525335687ef827f5d76aea49fcd0184b6ce3118e3f9d355f666a46ab60613e",
-      "bytes": 13076
-    },
-    "OEBPS/Fonts/note.ttf": {
-      "sha256_normalized": "15a5974d2b13267e3b9869afcca4bc9975a9fa61ed1a8a3ffa0079c8475a8c7b",
-      "bytes": 16040
-    },
-    "OEBPS/Fonts/sum.ttf": {
-      "sha256_normalized": "0b44845b7b48c244d6e5bc8ac76ec296c664c628d82aa2a44275149b8a5770db",
-      "bytes": 37580
-    },
-    "OEBPS/Fonts/sym.ttf": {
-      "sha256_normalized": "a05b538dba36e10a7e8fcb537b15bd2718a0b98b9d8891bd0d7a9daf5a364458",
-      "bytes": 1448
+    "OEBPS/Fonts/SourceHanSerifSC-SemiBold.subset.otf": {
+      "sha256_normalized": "4c2d07bc0a77ea6e3a198d480577da401174b333d8ac50c62bf71a4b4d96ee1e",
+      "bytes": 111028
     },
     "OEBPS/Images/cover.jpg": {
       "sha256_normalized": "f9e3b1d58ec936ff786ca913a54da02ef58ea127ca8cdb2fb3396938d01df544",
@@ -163,20 +139,20 @@
       "bytes": 2654
     },
     "OEBPS/Styles/default.css": {
-      "sha256_normalized": "9ac02294e829fda79db1607cccf48d040a93dcbba7b2775cc1e7607fb87a2eb8",
-      "bytes": 7442
+      "sha256_normalized": "5a69098dfcfc0e3fc8c6345f22e75ef4f6df1122f97bd8acc7cddc6f846b5beb",
+      "bytes": 7881
     },
     "OEBPS/Styles/necessary.css": {
-      "sha256_normalized": "769068bcafb6e945a1811c9033c6fa457f8b8387032dd27bdca18dba510f14e8",
-      "bytes": 12504
+      "sha256_normalized": "206bc4f1b36b2a8cd30aa8f624f9016121e797e5244bea527337aad2c6e9ae52",
+      "bytes": 12601
     },
     "OEBPS/Styles/stylesheet.css": {
-      "sha256_normalized": "6e2f59efe3104d57406888fc83d19cfbc3c17116d1f141560c1c4df0faab99b2",
-      "bytes": 118
+      "sha256_normalized": "52bb9309e4b23704c15b15632dd099b474c8474bac467142f357c83f57acdae6",
+      "bytes": 764
     },
     "OEBPS/Text/TOC.xhtml": {
-      "sha256_normalized": "adc56068bb83db958941cf31573da93cca5a08e17223132f00e17bf5db2df3ff",
-      "bytes": 2496
+      "sha256_normalized": "3444c624fb683258e86fd11b919b67b185ba8b94b3eabb189b3d1bbc6c0de2e4",
+      "bytes": 2521
     },
     "OEBPS/Text/chapter0001.xhtml": {
       "sha256_normalized": "2c87e219e91958d54cbd4920db1480eeae5f8e5694fc1b0ec782534cd0260b82",
@@ -279,8 +255,8 @@
       "bytes": 486
     },
     "OEBPS/Text/message.xhtml": {
-      "sha256_normalized": "825bdb831aedd86aa54e24e0e388076fb806f2f2bec11a700db7979986e1790c",
-      "bytes": 1681
+      "sha256_normalized": "455be32b44304bcf9732b775a8bd34e2da4935a23586f97f9f53af92d5948ad8",
+      "bytes": 1583
     },
     "OEBPS/Text/navigation-documents.xhtml": {
       "sha256_normalized": "65167c6708820c4a58172cacfae5c2c7b5908266158b7244cb30dd841ee15e35",
@@ -291,20 +267,20 @@
       "bytes": 545
     },
     "OEBPS/Text/special0001.xhtml": {
-      "sha256_normalized": "8e943ba1969f7697d591a8a45eb60c190e24d30ae686ad356801ad4164b02f25",
-      "bytes": 5487,
+      "sha256_normalized": "a1ea4f31f3b8ce5d176cf5c74e59bc42f24b4c9a21ecfd5a09abd0e450ba1a54",
+      "bytes": 5495,
       "para_count": 48,
       "footnote_count": 1
     },
     "OEBPS/Text/special0002.xhtml": {
-      "sha256_normalized": "f28761e45374bed75330f42cb702e744aaa0405fe750851493fc2a20c09f9f3b",
-      "bytes": 4020,
+      "sha256_normalized": "893fc8985751bd75fc7c9c807db504bf4efab9f9b5a2f3ab2cdf04011ca0969b",
+      "bytes": 4028,
       "para_count": 35,
       "footnote_count": 0
     },
     "OEBPS/Text/special0003.xhtml": {
-      "sha256_normalized": "8b3b571ef36dca33c4dee92cd8c59a1c0af3f7702e08402c0b80b90bee58e2b0",
-      "bytes": 5183,
+      "sha256_normalized": "178d8561b8311d65a7e18b06a5ff08d33e18b9716a5111522f998f9fb44f577d",
+      "bytes": 5191,
       "para_count": 48,
       "footnote_count": 0
     },
@@ -313,12 +289,12 @@
       "bytes": 1127
     },
     "OEBPS/Text/title.xhtml": {
-      "sha256_normalized": "440c82559f0aaf5d9537f4fa9a84ce990773ba5864d9194900a7e255f0ddd02a",
-      "bytes": 1259
+      "sha256_normalized": "0ec8358decf90a38e13808ab79285d862e17f6a0bed4e5cca2cc5b4e0d88ea56",
+      "bytes": 1253
     },
     "OEBPS/content.opf": {
-      "sha256_normalized": "54a65e91498aa16981d9ece94652fd5319f313754b672becd64d96685e42656a",
-      "bytes": 9514
+      "sha256_normalized": "cd4d785998f28915e03428ad79bba216621518260f6b7bb7356a21a257bdcdec",
+      "bytes": 9406
     },
     "OEBPS/toc.ncx": {
       "sha256_normalized": "b136ba82c4134befd7a049e5f98a979ae64e88cdcad315e03d3e88b0894bd82d",

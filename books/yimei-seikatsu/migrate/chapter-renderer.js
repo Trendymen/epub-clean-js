@@ -71,7 +71,9 @@ export function isFirstParaEpigraph(firstPara, epigraph) {
  *   footnoteAsides?: string[],
  *   chapterNumber?: number,
  *   epigraph?: string,
+ *   headingParts?: {h4?: string, h5?: string},
  * }} args
+ * headingParts 用于特典两级标题（h4 来源行 + h5 作品名，对齐日翻排版）；缺省时输出单行 h3。
  * @returns {string}
  */
 export function renderChapter({
@@ -80,6 +82,7 @@ export function renderChapter({
   footnoteAsides,
   chapterNumber,
   epigraph,
+  headingParts,
 }) {
   if (footnoteAsides && footnoteAsides.length > 0) {
     console.warn(
@@ -101,6 +104,7 @@ export function renderChapter({
   const env = getEnv();
   return env.render('chapter.xhtml.njk', {
     title,
+    headingParts: (headingParts && (headingParts.h4 || headingParts.h5)) ? headingParts : null,
     blocks: workingBlocks,
     // 仍把 footnoteAsides 传给模板以保持向后兼容，
     // 但模板不再使用它（asides 应通过 dict block 内嵌进 <note>）。

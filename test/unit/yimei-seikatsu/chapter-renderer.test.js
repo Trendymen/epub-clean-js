@@ -25,6 +25,20 @@ test('renderChapter: basic chapter', () => {
   assert.ok(!html.includes('<note>'));
 });
 
+test('renderChapter: headingParts 渲染 h4+h5 两级特典标题（对齐日翻与 11-13 特典版）', () => {
+  const html = renderChapter({
+    title: '电子书特典　『棉花糖般甜蜜』',
+    headingParts: { h4: '电子书特典', h5: '『棉花糖般甜蜜』' },
+    blocks: ['第一段'],
+  });
+  assert.ok(html.includes('<title>电子书特典　『棉花糖般甜蜜』</title>'), '<title> 仍用合并标题');
+  assert.ok(html.includes('<h4>电子书特典</h4>'), '来源行应为 h4（宋 Heavy 链）');
+  assert.ok(html.includes('<h5>『棉花糖般甜蜜』</h5>'), '作品名应为 h5（宋 SemiBold 链）');
+  assert.ok(!html.includes('<h3>'), '有 headingParts 时不应再输出 h3');
+  assert.ok(html.indexOf('<h4>') < html.indexOf('<h5>'), 'h4 应在 h5 之前');
+  assert.ok(html.includes('<p>第一段</p>'));
+});
+
 test('renderChapter: inline sup + asides (legacy footnoteAsides, deprecated)', () => {
   // 旧接口：footnoteAsides 仍可调用但模板不再渲染（asides 不出现在输出里）；
   // 函数会打 deprecation warning（这里只验证签名不报错）。

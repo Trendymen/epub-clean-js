@@ -20,6 +20,7 @@ import { randomUUID } from 'node:crypto';
 
 import { parseHTML } from 'linkedom';
 
+import { applyToDir } from '../../../src/core/font-subset.js';
 import { readEpub } from '../../../src/core/zip-io.js';
 import { packEpub } from './epub-io.js';
 import { extractParagraphs } from './paragraph-extractor.js';
@@ -71,14 +72,13 @@ const CHAPTER_MAP_09 = [
 const CREDITS_09 = [
   ['作者', '三河ごーすと'],
   ['插画', 'Hiten'],
-  ['译者', '幽蝉满耳'],
-  ['校对', '炫目林光'],
+  ['译者', 'Seeker'],
   ['图源', 'UU'],
   ['录入', 'coolbar'],
   ['嵌字', '闲的e书组'],
   ['ePub', '落合葵'],
 ];
-const CREDITS_URL = 'https://www.lightnovel.us';
+const CREDITS_URL = 'https://www.lightnovel.fun/';
 
 // 09 卷简介
 const SRC_DESCRIPTION_09 = `我紧紧握住他牵着我的那只手，一点都不想放开。
@@ -162,17 +162,23 @@ function extractH3Title(xhtmlPath) {
   return '未命名章节';
 }
 
-function extractH4H5Title(xhtmlPath) {
+function extractH4H5Parts(xhtmlPath) {
   const xml = readFileSync(xhtmlPath, 'utf-8');
   const { document } = parseHTML(xml);
-  const parts = [];
+  const parts = {};
   for (const tag of ['h4', 'h5']) {
     for (const el of document.querySelectorAll(tag)) {
       const text = (el.textContent ?? '').trim();
-      if (text) { parts.push(text); break; }
+      if (text) { parts[tag] = text; break; }
     }
   }
-  return parts.length > 0 ? parts.join('　') : extractH3Title(xhtmlPath);
+  return parts;
+}
+
+function extractH4H5Title(xhtmlPath) {
+  const parts = extractH4H5Parts(xhtmlPath);
+  const merged = [parts.h4, parts.h5].filter(Boolean).join('　');
+  return merged || extractH3Title(xhtmlPath);
 }
 
 function lowerExt(name) {
@@ -518,7 +524,10 @@ async function migrateSpecials({ dstUnpacked, buildDir, profile, volume }) {
     }
 
     const title = spec.title ?? extractH4H5Title(dstPath);
-    const xhtml = renderChapter({ title, blocks });
+    // 特典页保留日翻的两级标题结构：h4 来源行（宋 Heavy 链）+ h5 作品名（宋 SemiBold 链）；
+    // TOC 条目仍用合并标题。
+    const headingParts = extractH4H5Parts(dstPath);
+    const xhtml = renderChapter({ title, blocks, headingParts });
     await writeFile(join(buildDir, 'OEBPS/Text', name), xhtml, 'utf-8');
     tocEntries.push({ title, href: `Text/${name}` });
 
@@ -638,6 +647,9 @@ async function writeMetadataAndToc({ buildDir, chapterToc, specialToc }) {
   const nav = buildNavXhtml({ title: '目录', entries: stripTextPrefix(fullToc) });
   await writeFile(join(buildDir, 'OEBPS/Text/navigation-documents.xhtml'), nav, 'utf-8');
 
+  // 字体开源化：删旧子集字体、写思源子集、重写 CSS（manifest 随后自动扫描）
+  await applyToDir(join(buildDir, 'OEBPS'));
+
   // 扫 manifest + spine + 写 opf
   const manifestItems = await buildManifest(join(buildDir, 'OEBPS'));
   const spineItems = buildSpine();
@@ -655,7 +667,7 @@ async function writeMetadataAndToc({ buildDir, chapterToc, specialToc }) {
 async function buildManifest(oebpsDir) {
   const mediaTypes = {
     '.xhtml': 'application/xhtml+xml', '.css': 'text/css',
-    '.js': 'application/javascript', '.ttf': 'font/ttf',
+    '.js': 'application/javascript', '.ttf': 'font/ttf', '.otf': 'font/otf',
     '.webp': 'image/webp', '.jpg': 'image/jpeg', '.png': 'image/png',
     '.ncx': 'application/x-dtbncx+xml',
   };

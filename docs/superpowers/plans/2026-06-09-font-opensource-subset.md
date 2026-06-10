@@ -2,9 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 把 09/11/12/13 卷台简产物里搞不清命名的子集字体，统一替换为按卷实际用字子集化的思源开源字体（宋 Regular / 宋 Bold / 黑 Bold），彻底消除标题/目录/简介/正文的缺字。
+> **2026-06-10 四次排查定稿（覆盖正文及此前所有批注）**：此前各轮的字体归属均已作废——二次排查把 ch2/ctt1 误判为黑体；三次排查在小尺寸渲染下又把 ch1（实为太宋/アンチック）与 note（实为宋 Medium）误判为黑体，均被 ≥240px 字形渲染图与 Apple Books 实机显示推翻。当前真值（与 spec 一致，2026-06-10 实机校准定稿）：仅台简产物做开源字体替换；`main/sum/mes` 归思源黑 Regular，`note` 归思源宋 Medium，`ch1/ch2` 归思源宋 Bold（+合成加粗），`ch3` 归纯思源宋 Bold（Bold Sub 面声明 font-weight:bold 抑制合成），`ctt1` 归思源宋 SemiBold，`ctt2/cont` 归思源宋 Light；每卷输出 **6 个子集字体**（SansSC-Regular + SerifSC-Light/Medium/SemiBold/Bold/BoldSub 各 .subset.otf，黑 Bold 与宋 Heavy 面均已移除）；@font-face 默认不声明 font-weight（例外：Bold Sub 面声明 `font-weight:bold`）；xhtml 内联 `<style>` 同步重映射；09 特典页保留 h4+h5 两级标题。11-15 日翻 healed 不改字体。
 
-**Architecture:** 新增纯函数模块 `src/core/font-subset.js`，负责「扫各部位用字 → 用 subset-font 从思源源字体子集化 3 个字体 → 重写 CSS（真实思源命名 + 删旧 @font-face/孤儿引用 + 去 emoji/sym fallback）→ 替换字体文件」。两条产物管线（09 走 migrate-epub.js 目录模型，11/12/13 走 lightnovel-html/index.js 内存 files map）在「xhtml 齐全后、manifest 自动扫描前」各调用一个适配器。
+**Goal:** 把 09/11/12/13 卷台简产物里搞不清命名的子集字体，统一替换为按卷实际用字子集化的思源开源字体（黑 Regular/Bold + 宋 Light/SemiBold/Bold 五档，对齐日翻原版字重分级），彻底消除标题/目录/简介/正文的缺字；日翻 healed 不改字体。
+
+**Architecture:** 新增纯函数模块 `src/core/font-subset.js`，负责「扫各部位用字 → 用 subset-font 从思源源字体子集化 5 个字体 → 重写 CSS（真实思源命名 + 删旧 @font-face/孤儿引用 + 去 emoji/sym fallback）→ 重映射 xhtml 内联 `<style>` → 替换字体文件」。两条产物管线（09 走 migrate-epub.js 目录模型，11/12/13 走 lightnovel-html/index.js 内存 files map）在「xhtml 齐全后、manifest 自动扫描前」各调用一个适配器。
 
 **Tech Stack:** Node ESM、`subset-font`（harfbuzz 内核）、`opentype.js`（验证）、`adm-zip`/`yazl`、`opencc-js`。
 
@@ -17,8 +19,8 @@
 | 文件 | 动作 | 职责 |
 |---|---|---|
 | `package.json` | 修改 | 加 `subset-font` 依赖 |
-| `books/source-han-sans-sc/` | 已下载 | 思源黑体 SC（**经高清核实 ch1 实为粗宋体，本方案最终不使用黑体；已下载留作备用，被 .gitignore 忽略**） |
-| `src/core/font-subset.js` | 新增 | 字符集提取 + 子集化 + CSS 重写 + 两个 IO 适配器 |
+| `books/source-han-sans-sc/` | 已下载 | 思源黑体 SC（Regular/Bold 用于 main/sum/mes/note/ch1/ch2/ctt1） |
+| `src/core/font-subset.js` | 新增 | 字符集提取 + 子集化 + CSS/OPF 重写 + 两个 IO 适配器 |
 | `test/unit/yimei-seikatsu/font-subset.test.js` | 新增 | 模块单测 |
 | `books/yimei-seikatsu/lightnovel-html/index.js` | 修改 | `mediaTypeFor` 加 .otf；集成 `applyToFiles`；`simplifyText` 加 U+223C 规范化 |
 | `books/yimei-seikatsu/migrate/migrate-epub.js` | 修改 | `buildManifest` media-type 加 .otf；集成 `applyToDir` |
@@ -26,13 +28,21 @@
 
 **关键不变量**：两条管线的字体 manifest 都是「扫目录/扫 files map」自动生成（migrate-epub.js:674、lightnovel-html/index.js:1196），所以删旧字体 + 写新字体后 manifest 自动反映，无需手改 manifest 列表，只需让 media-type 映射识别 `.otf`。
 
-**字符集策略**（全书 9 部位经高清核实**全为宋体**，只需 2 个思源宋字重）：
-- `regular` 子集 = 全书所有字符（正文用 Regular，覆盖全书）。
-- `bold` 子集 = 全书所有 `<h3>` + `<h4>` 文本 + `class` 含 `cut`/`ch1` 的元素文本 + 目录页（TOC.xhtml/navigation-documents.xhtml）全文 + 全书非汉字符号。
+**字符集策略**（2026-06-10 实机校准定稿为 6 路；`<style>/<script>` 内容不计入用字）：
+- `sansRegular` 子集 = 全书所有字符（正文、简介、消息等黑体常规链）。
+- `serifBold` 子集 = `<h3>`/`<h4>` + `class` 含 `cut/ch1/ch2` 的元素文本 + 全书非汉字符号。
+- `serifBoldSub` 子集 = `<h5>` + `class` 含 `ch3` 的元素文本 + 全书非汉字符号（同源 Bold、独立小子集）。
+- `serifSemiBold` 子集 = `class` 含 `ctt1/toc` 的元素文本 + 目录页全文 + 全书非汉字符号。
+- `serifMedium` 子集 = `class` 含 `note/duokan-footnote-item` 的元素文本 + 全书非汉字符号。
+- `serifLight` 子集 = `class` 含 `ctt/ctt2/ctit` 的元素文本 + 目录页全文 + 全书非汉字符号。
 
-**CSS 字体名映射**（旧 token → 新 family role）：
-- `main/ch3/sum/mes/note/cont/int/title` → serif（`"Source Han Serif SC"`）
-- `ch2/ctt1/ctt2/ch1` → serifBold（`"Source Han Serif SC Bold"`）
+**CSS 字体名映射**（旧 token → 新 family role；CSS 与 xhtml 内联 `<style>` 同规则）：
+- `main/sum/mes/int/title` → sansRegular（`"Source Han Sans SC"`）
+- `note` → serifMedium（`"Source Han Serif SC Medium"`）
+- `ch1/ch2` → serifBold（`"Source Han Serif SC Bold"`，规则层 bold 合成保留）
+- `ch3` → serifBoldSub（`"Source Han Serif SC Bold Sub"`，face 声明 bold 抑制合成 = 纯 Bold）
+- `ctt1` → serifSemiBold（`"Source Han Serif SC SemiBold"`）
+- `ctt2/cont` → serifLight（`"Source Han Serif SC Light"`；cont 即目录标题链，13 卷 `.ctt` 实际引用 cont）
 - `illus1-5/num/emoji/sym` 及其它未知 token → 删除该 `font-family` 声明（孤儿）
 - `initial/inherit` → 保留不动
 
