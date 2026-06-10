@@ -192,7 +192,9 @@ test('buildLightNovelEpub places epigraph page after TOC and before chapter one'
     assert.match(epub.entries['OEBPS/Text/navigation-documents.xhtml'].toString('utf8'), /special0001.xhtml/);
     assert.match(epub.entries['OEBPS/toc.ncx'].toString('utf8'), /虎穴特典　『卡拉OK男子会』/);
     assert.ok(epub.entries['OEBPS/Images/t1.png']);
-    assert.ok(epub.entries['OEBPS/Images/logo.png']);
+    // STERA ePub++ logo 已移除：制作信息不再展示，且不打包孤儿图片
+    assert.ok(!epub.entries['OEBPS/Images/logo.png']);
+    assert.doesNotMatch(epub.entries['OEBPS/Text/message.xhtml'].toString('utf8'), /class="logo"|alt="logo"/);
     assert.ok(epub.entries['OEBPS/Images/bonus.png']);
     assert.ok(epub.entries['OEBPS/Images/bonus-illus.webp']);
     assert.match(epub.entries['OEBPS/Text/illus0008.xhtml'].toString('utf8'), /kuchie-002\.jpg/);

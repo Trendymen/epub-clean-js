@@ -1078,8 +1078,9 @@ export async function buildLightNovelEpubFromBook(book, {
   for (const assetName of specials.assetNames) {
     files[assetName] = styleRef.entries[assetName];
   }
+  // 11-13 制作信息不再展示 STERA ePub++ logo：删除从 styleRef 继承的 logo 图片，避免孤儿资源
   const logoEntryName = Object.keys(files).find((name) => /^OEBPS\/Images\/logo\./i.test(name));
-  const logoFileName = logoEntryName ? path.posix.basename(logoEntryName) : null;
+  if (logoEntryName) delete files[logoEntryName];
 
   const textEntries = [];
   const navEntries = [];
@@ -1105,7 +1106,7 @@ export async function buildLightNovelEpubFromBook(book, {
 
   addText('cover.xhtml', 'Text/cover.xhtml', renderCoverXhtml(book.coverImage), 'scripted', 'duokan-page-fullscreen');
   addText('title.xhtml', 'Text/title.xhtml', styleTitleXhtml || renderTitleXhtml(book), null);
-  addText('message.xhtml', 'Text/message.xhtml', renderMessageXhtml(book, { logoFileName, creditOverrides }));
+  addText('message.xhtml', 'Text/message.xhtml', renderMessageXhtml(book, { creditOverrides }));
   if (styleSummaryXhtml) {
     addText('summary.xhtml', 'Text/summary.xhtml', styleSummaryXhtml);
   }
