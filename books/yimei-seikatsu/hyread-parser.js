@@ -77,11 +77,39 @@ function extractImageHrefs(xhtml) {
  * 从单一章节 XHTML 中提取文本和图片块。
  * 所有图片的 src 存储为 "image/xxx.jpg" 格式（不含 item/ 前缀）。
  */
+// 生僻字代用图 → 真字符映射。
+// 台繁源把字体可能缺的生僻人名用字做成 1em 行内小图嵌在文字里；台简思源字体有这些字形，
+// 直接还原为真字符（可选可搜、无豆腐块）。
+const RARE_CHAR_IMAGE_MAP = {
+  'p000.png': '﨑', // 﨑：13 卷后记声优「天﨑滉平」名字用字
+};
+
+// 重建含行内代用字图的段落文本：文本节点取文，<img> 取映射真字符（无映射则略过），<br> 忽略。
+function buildInlineText(pEl) {
+  let out = '';
+  const walk = (node) => {
+    for (const c of node.childNodes) {
+      if (c.nodeType === 3) { out += c.textContent || ''; continue; }
+      if (c.nodeType !== 1) continue;
+      const tag = (c.localName || c.tagName || '').toLowerCase();
+      if (tag === 'img') {
+        const base = path.posix.basename((c.getAttribute('src') || '').split('?')[0]);
+        out += RARE_CHAR_IMAGE_MAP[base] || '';
+      } else if (tag !== 'br') {
+        walk(c);
+      }
+    }
+  };
+  walk(pEl);
+  return out;
+}
+
 function parseChapterXhtml(xhtml) {
   const blocks = [];
+  let headingText = null;
   const { document } = parseHTML(xhtml);
   const main = document.querySelector('.main');
-  if (!main) return { blocks };
+  if (!main) return { blocks, headingText };
 
   for (const child of main.childNodes) {
     if (child.nodeType !== 1) continue;
@@ -102,12 +130,27 @@ function parseChapterXhtml(xhtml) {
       const text = (child.textContent || '').trim();
       if (/^[　\s]*$/.test(text) && child.querySelector('br')) continue;
 
+      // 章节标题大字（gfont font-1em40）：单独抽出当标题，不进正文 blocks（避免与 h3 重复）。
+      // 结构识别比文本匹配可靠——台繁 TOC 标题与正文标题措辞可能不同（如「与」vs「和」）。
+      if (headingText === null && /font-1em40/.test(html)) {
+        const ht = (child.textContent || '').replace(/\s+/g, '');
+        if (ht) { headingText = ht; continue; }
+      }
+
       // 内嵌图片
       const img = child.querySelector('img');
       if (img) {
-        const src = img.getAttribute('src') || '';
-        if (src) {
-          const base = path.posix.basename(src.split('?')[0]);
+        const base = path.posix.basename((img.getAttribute('src') || '').split('?')[0]);
+        const imgCls = img.getAttribute('class') || '';
+        // 行内代用字图（生僻字做成 1em 小图嵌在文字里）：还原整段文字 + 真字符，不抽成块图。
+        const isInlineGlyph = /\bheight-1em\b/.test(imgCls) || Object.prototype.hasOwnProperty.call(RARE_CHAR_IMAGE_MAP, base);
+        if (isInlineGlyph) {
+          const inlineText = buildInlineText(child).replace(/\s+/g, '');
+          if (inlineText) blocks.push({ type: 'text', text: inlineText, bold: false });
+          continue;
+        }
+        // 整页插图
+        if (base) {
           const id = base.replace(/\.[^.]+$/, '');
           blocks.push({
             type: 'image',
@@ -147,7 +190,7 @@ function parseChapterXhtml(xhtml) {
     }
   }
 
-  return { blocks };
+  return { blocks, headingText };
 }
 
 /**
@@ -269,44 +312,36 @@ export async function parseHyreadEpubToBook(sourceEpubPath, { volume, creditOver
   const fileBlocks = [];
   for (const chPath of chapterFiles) {
     const fileName = chPath.split('/').pop(); // "p-001.xhtml"
-    const { blocks } = parseChapterXhtml(read(chPath));
+    const { blocks, headingText } = parseChapterXhtml(read(chPath));
     for (const b of blocks) {
       if (b.type === 'text') b.text = simplifyText(b.text);
     }
-    fileBlocks.push({ fileName, blocks });
+    fileBlocks.push({ fileName, blocks, headingText: headingText ? simplifyText(headingText) : null });
   }
 
   // == 6) 分类：题记 / 章节 / 后记 ==
   const chapters = [];
   let preBlocks = [];
 
-  for (const { fileName, blocks } of fileBlocks) {
+  for (const { fileName, blocks, headingText } of fileBlocks) {
     const tocTitle = tocFileToTitle.get(fileName);
 
     if (tocTitle) {
-      // 在 TOC 中 → 普通章节。源章节正文首段就是大字标题（gfont 大号字），
-      // 会与渲染出的 h3 标题重复，hyread 路径需手动剥掉这段重复标题。
-      const title = simplifyText(tocTitle);
-      const titleKey = title.replace(/\s+/g, '');
-      const firstTextIdx = blocks.findIndex((b) => b.type === 'text');
-      if (firstTextIdx >= 0 && blocks[firstTextIdx].text.replace(/\s+/g, '') === titleKey) {
-        blocks.splice(firstTextIdx, 1);
-      }
-      chapters.push({ title, blocks });
+      // 在 TOC 中 → 普通章节。大字标题已在 parseChapterXhtml 抽出（不在 blocks 里），
+      // h3 用 TOC 标题；台繁 TOC 与正文标题措辞可能不同（如「与」vs「和」），按结构剥除不受影响。
+      chapters.push({ title: simplifyText(tocTitle), blocks });
     } else if (fileName === 'p-001.xhtml') {
       // p-001 不在 TOC 中，内容为卷首语 → preBlocks
       const textBlocks = blocks.filter((b) => b.type === 'text');
       preBlocks = textBlocks.length > 0 && textBlocks[0].text.length < 200 ? textBlocks : [];
     } else {
-      // 其他不在 TOC 中的（如 p-015 后记）：首段大字即标题，提升为 h3 并从正文剥除避免重复。
-      const firstTextIdx = blocks.findIndex((b) => b.type === 'text');
-      const rawTitle = firstTextIdx >= 0 ? blocks[firstTextIdx].text.trim() : '';
+      // 其他不在 TOC 中的（如 p-015 后记）：用抽出的大字标题作 h3，正文已不含标题。
+      const rawTitle = headingText || (blocks.find((b) => b.type === 'text')?.text?.trim() || '');
       let title = rawTitle;
       // 检测后记
       if (/^后记|^後記|^あとがき/.test(rawTitle)) {
         title = '后记';
       }
-      if (firstTextIdx >= 0) blocks.splice(firstTextIdx, 1);
       chapters.push({ title, blocks });
     }
   }
