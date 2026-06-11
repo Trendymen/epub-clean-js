@@ -24,7 +24,7 @@ import { readFileSync, createWriteStream } from 'node:fs';
 import { mkdir, writeFile, cp, rm, readdir } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import yazl from 'yazl';
-import { GRAB_JSON, EPUB_ITEM, EPUB_BUILD, OUTPUT_EPUB, OUTPUT_DIR, BOOK_TITLE } from '../config.mjs';
+import { GRAB_JSON, EPUB_ITEM, EPUB_BUILD, OUTPUT_EPUB, OUTPUT_DIR, BOOK_TITLE, VOLUME } from '../config.mjs';
 
 const j = JSON.parse(readFileSync(GRAB_JSON, 'utf8'));
 
@@ -32,6 +32,30 @@ const j = JSON.parse(readFileSync(GRAB_JSON, 'utf8'));
 const mkLinks = (list) => list.map((c) => `<link rel="stylesheet" type="text/css" href="../style/${c}"/>`).join('\n');
 const CSS_TEXT = ['style-reset.css', 'style-standard.css', 'style-advance.css', 'book-style.css', 'style-bc-kadokawa.css', 'style-check.css'];
 const CSS_IMG = ['style-reset.css', 'fixed-layout-jp.css'];
+
+// 按卷的内容修正：修正出版方原始笔误，仅对指定卷的指定页生效。
+// vol08：书内目次 p-toc-001 的两处 6 月星期（６月１日「星期五」、６月７日「星期六」）与正文章节标题
+// 及全书日历不一致——年份无关的内部一致性判定它们为唯一离群点，这里把目次页对齐到正文一致的星期。
+// 精确字串 replaceAll，不会误伤其它条目。
+const CONTENT_FIXES = {
+  '08': {
+    'xhtml/p-toc-001.xhtml': [
+      ['６月１日（星期五）', '６月１日（星期二）'],
+      ['６月７日（星期六）', '６月７日（星期一）'],
+    ],
+  },
+};
+function applyContentFixes(rel, html) {
+  const fixes = (CONTENT_FIXES[VOLUME] || {})[rel];
+  if (!fixes) return html;
+  let out = html;
+  for (const [from, to] of fixes) {
+    if (!out.includes(from)) { console.warn(`  [content-fix] 警告：${rel} 未找到待修正字串「${from}」（源可能已变，跳过）`); continue; }
+    out = out.split(from).join(to);
+    console.log(`  [content-fix] ${rel}: 「${from}」→「${to}」`);
+  }
+  return out;
+}
 
 // 清理阅读器运行时注入物，保留正文与原始结构
 function clean(html) {
@@ -47,16 +71,13 @@ function clean(html) {
   return html;
 }
 
-// nav 标题：图片/结构页用语义标签，正文页取首个 gfont 段全文
-const PAGE_LABELS = {
+// nav 标题：结构页用固定语义标签（跨卷稳定的文件名），正文页取首个 gfont 段全文，彩页按 spine 位置判断。
+const FIXED_LABELS = {
   'xhtml/p-cover.xhtml': '封面',
-  'xhtml/p-fmatter-001.xhtml': '彩頁插圖 1', 'xhtml/p-fmatter-002.xhtml': '彩頁插圖 2',
-  'xhtml/p-fmatter-003.xhtml': '彩頁插圖 3', 'xhtml/p-fmatter-004.xhtml': '彩頁插圖 4',
-  'xhtml/p-fmatter-005.xhtml': '彩頁插圖 5',
-  'xhtml/p-titlepage.xhtml': '書名頁', 'xhtml/p-toc-001.xhtml': '目次',
+  'xhtml/p-titlepage.xhtml': '書名頁',
+  'xhtml/p-toc-001.xhtml': '目次',
   'xhtml/p-001.xhtml': '引言',
-  'xhtml/p-fmatter-006.xhtml': '卷末插圖 1', 'xhtml/p-fmatter-007.xhtml': '卷末插圖 2',
-  'xhtml/p-fmatter-008.xhtml': '卷末插圖 3', 'xhtml/p-colophon.xhtml': '版權頁',
+  'xhtml/p-colophon.xhtml': '版權頁',
 };
 function chapterTitle(html) {
   const gi = html.indexOf('gfont');
@@ -70,7 +91,16 @@ function chapterTitle(html) {
   }
   return html.slice(html.indexOf('<body')).replace(/<[^>]+>/g, ' ').replace(/[　\s]+/g, ' ').trim().slice(0, 24);
 }
-const labelOf = (rel, html) => PAGE_LABELS[rel] || chapterTitle(html) || rel;
+// 彩页(fmatter)在不同卷里数量/前后分布不同（如 12 卷前彩页含 fmatter-006、卷末为 fmatter-007~010），
+// 硬编码文件名会串卷。改按 spine 位置归类：目次(p-toc)之前 = 前彩页「彩頁插圖 N」，之后 = 卷末「卷末插圖 N」。
+function makeFmatterLabeler(order) {
+  const rels = order.map(relOf);
+  let divider = rels.findIndex((r) => /p-toc/.test(r));
+  if (divider < 0) divider = rels.findIndex((r) => /p-\d{3}\.xhtml$/.test(r));
+  let frontN = 0;
+  let backN = 0;
+  return (i) => (divider >= 0 && i < divider ? `彩頁插圖 ${++frontN}` : `卷末插圖 ${++backN}`);
+}
 
 const relOf = (src) => src.split('/item/')[1];
 
@@ -121,10 +151,17 @@ await cp(join(EPUB_ITEM, 'image'), join(EPUB_BUILD, 'item/image'), { recursive: 
 
 // 清理后的解密 xhtml + nav 条目
 const navItems = [];
-for (const src of j.order) {
+const fmatterLabel = makeFmatterLabeler(j.order);
+for (let i = 0; i < j.order.length; i++) {
+  const src = j.order[i];
   const rel = relOf(src);
-  await writeFile(join(EPUB_BUILD, 'item', rel), clean(j.data[src]), 'utf8');
-  navItems.push({ href: rel, title: labelOf(rel, j.data[src]) });
+  const raw = applyContentFixes(rel, j.data[src]);
+  await writeFile(join(EPUB_BUILD, 'item', rel), clean(raw), 'utf8');
+  let title;
+  if (FIXED_LABELS[rel]) title = FIXED_LABELS[rel];
+  else if (/p-fmatter-/.test(rel)) title = fmatterLabel(i);
+  else title = chapterTitle(raw) || rel;
+  navItems.push({ href: rel, title });
 }
 
 // navigation-documents.xhtml（opf 引用的 nav）

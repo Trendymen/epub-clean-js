@@ -10,9 +10,9 @@ import { dirname, join, resolve } from 'node:path';
 const HYREAD_DIR = dirname(fileURLToPath(import.meta.url)); // .../epub-clean-js/hyread
 
 // ===== 当前处理的卷（换卷改这三项）=====
-export const VOLUME = '13';
-export const ASSET_ID = '8a8a84ca9c26f614019d30ed8e040faa'; // 阅读器 URL 里的 asset_id
-export const BOOK_TITLE = '義妹生活 13';
+export const VOLUME = '08';
+export const ASSET_ID = '8a8a84ca8cf2eb56018d6786f66a472c'; // 阅读器 URL 里的 asset_id
+export const BOOK_TITLE = '義妹生活 8';
 
 // ===== 服务端 =====
 export const SERVICE = 'https://service.ebook.hyread.com.tw';
