@@ -540,7 +540,12 @@ async function migrateSpecials({ dstUnpacked, buildDir, profile, volume }) {
 // Step 4 (9j)：附章 cover/illus(5)/title/message/summary/contents/pre/TOC
 // ============================================================
 
-async function writeAttachedPages({ buildDir }) {
+function titleNumberWidthForVolume(volume) {
+  const n = Number.parseInt(String(volume), 10);
+  return Number.isFinite(n) && n < 10 ? '1.5em' : '2.5em';
+}
+
+async function writeAttachedPages({ buildDir, volume }) {
   const textDir = join(buildDir, 'OEBPS/Text');
 
   // cover.xhtml
@@ -559,7 +564,9 @@ async function writeAttachedPages({ buildDir }) {
   // title.xhtml
   await writeFile(
     join(textDir, 'title.xhtml'),
-    buildTitleXhtml('t1.webp', 't2.webp', 't3.webp', 't4.webp'),
+    buildTitleXhtml('t1.webp', 't2.webp', 't3.webp', 't4.webp', {
+      numberWidth: titleNumberWidthForVolume(volume),
+    }),
     'utf-8',
   );
 
@@ -803,7 +810,7 @@ export default async function migrate({ srcEpub, dstEpub, refEpub, outEpub, volu
     await setupBuildDir({ refUnpacked, dstUnpacked, srcUnpacked, buildDir });
 
     console.log('=== Step 2: 写附章（cover/illus/title/message/summary/contents/pre） ===');
-    await writeAttachedPages({ buildDir });
+    await writeAttachedPages({ buildDir, volume });
 
     console.log('=== Step 3: 迁移 12 个正文章节 ===');
     const { tocEntries: chapterToc, reviewItems } = await migrateChapters({

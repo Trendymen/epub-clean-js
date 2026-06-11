@@ -445,6 +445,124 @@ function isCopiedAsset(name) {
   );
 }
 
+function collectTitleImages(styleRef, titlePath, rawContent) {
+  const images = new Map();
+  for (const imageRef of extractImageRefsFromXhtml(rawContent)) {
+    const resolved = resolveEpubRelativePath(titlePath, imageRef);
+    const basename = resolved ? path.posix.basename(resolved) : '';
+    const match = basename.match(/^(t[1-4])\.(png|jpe?g|webp)$/i);
+    if (!match || !styleRef.entries[resolved]) continue;
+    const fileName = `${match[1].toLowerCase()}.${match[2].toLowerCase().replace('jpeg', 'jpg')}`;
+    images.set(match[1].toLowerCase(), {
+      fileName,
+      buffer: styleRef.entries[resolved],
+    });
+  }
+  return images;
+}
+
+function renderStyleTitleFromImages(images) {
+  const imageName = (id) => escapeXml(images.get(id).fileName);
+  return `${XML_HEADER}
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="zh" xmlns:epub="http://www.idpf.org/2007/ops" xmlns:xml="http://www.w3.org/XML/1998/namespace">
+<head>
+ <title>标题</title>
+ <link href="../Styles/stylesheet.css" type="text/css" rel="stylesheet"/>
+ <script type="text/javascript" src="../Misc/script.js"></script>
+ <style>
+ .textbox{font-family:title,main,emoji,sym;}
+ .textbox p{margin:0;text-indent:0;duokan-text-indent:0;text-align:center;line-height:1em;font-weight:bold;}
+ .textbox .c1{font-size:0.8em;color:#EB6161;}
+ .textbox .c2{font-size:1.1em;padding:0.2em 0 1.5em;}
+ .textbox .c3{font-size:0.8em;color:#E1C851;}
+ .textbox .c4{font-size:1em;padding:0.15em 0 0;}
+ </style>
+</head>
+<body>
+  <div class="center" style="margin:4em auto 1em;">
+   <p class="tilh"><img alt="t1" src="../Images/${imageName('t1')}" style="width:13em;"/></p>
+  </div>
+  <div class="center" style="margin:1em auto 2.5em;">
+   <p class="tilh"><img alt="t2" src="../Images/${imageName('t2')}" style="width:1.5em;"/></p>
+  </div>
+  <div class="textbox">
+   <p class="c1">作者</p>
+   <p class="c2"><img alt="t3" src="../Images/${imageName('t3')}" style="width:5em;"/></p>
+   <p class="c3">插画</p>
+   <p class="c4"><img alt="t4" src="../Images/${imageName('t4')}" style="width:3em;"/></p>
+  </div>
+</body>
+</html>`;
+}
+
+function buildStyleTitleXhtml(styleRef, volume, files) {
+  if (!styleRef) return null;
+  if (volume !== '08') {
+    return selfCloseVoidTags(styleRef.entries['OEBPS/Text/title.xhtml']?.toString('utf8') || null);
+  }
+
+  const titlePath = styleRef.entries['OEBPS/Text/title.xhtml']
+    ? 'OEBPS/Text/title.xhtml'
+    : (styleRef.entries['Text/title.xhtml'] ? 'Text/title.xhtml' : null);
+  if (!titlePath) return null;
+
+  const rawContent = styleRef.entries[titlePath].toString('utf8');
+  const images = collectTitleImages(styleRef, titlePath, rawContent);
+  if (!['t1', 't2', 't3', 't4'].every((id) => images.has(id))) {
+    return titlePath.startsWith('OEBPS/')
+      ? selfCloseVoidTags(rawContent)
+      : null;
+  }
+
+  for (const { fileName, buffer } of images.values()) {
+    files[`OEBPS/Images/${fileName}`] = buffer;
+  }
+  return renderStyleTitleFromImages(images);
+}
+
+// 按卷把 styleRef 自带的「章节标题/目次」样式对齐到指定基准。
+// 08 用 healed 08 当 styleRef（为拿其特典+字体），但 08 日翻自带的 .ctt/.toc 是 11 式居中风
+// （且 .toc 带无效的 `font-weight:slid` 笔误）；按用户要求对齐到 13 台简的样式（左对齐 2em + 目次左边框）。
+// 在 applyToFiles（字体开源化重写 CSS）之后执行，故匹配的是已重映射为思源字体的最终形态。
+const VOLUME_STYLE_ALIGN = {
+  '08': [
+    [/\.ctt\{font-family:"Source Han Serif SC Light";[^}]*\}/,
+      '.ctt{font-family:"Source Han Serif SC Light";text-align:left;font-size:2em;margin:1.3em 0.75em 0.5em;font-weight:bold}'],
+    [/\.toc\{margin:[^}]*text-align:center[^}]*\}/,
+      '.toc{margin:0 0 0.5em 1.75em;text-align:left;border-left:3px rgba(124,124,124,0.5) solid}'],
+  ],
+};
+function applyVolumeStyleAlign(files, volume) {
+  const rules = VOLUME_STYLE_ALIGN[volume];
+  const key = 'OEBPS/Styles/necessary.css';
+  if (!rules || !files[key]) return;
+  let css = files[key].toString('utf8');
+  for (const [re, repl] of rules) {
+    if (!re.test(css)) { console.warn(`  [style-align] 卷${volume}: 未匹配规则（源样式可能已变，跳过）`); continue; }
+    css = css.replace(re, repl);
+    console.log(`  [style-align] 卷${volume}: ${repl.slice(0, 36)}…`);
+  }
+  files[key] = Buffer.from(css);
+}
+
+// 按卷替换指定插图为另一来源的版本（用户指定）。
+// 08：开头插图「未来預想圖」(产物里为 kuchie-004.jpg) 改用 08 日翻的版本；
+// 日翻原为 .webp，已 sips 转 JPEG 存于 ../assets/v08-kuchie-future.jpg，台简彩页用 <img> 故尺寸自适应。
+const VOLUME_IMAGE_OVERRIDE = {
+  '08': [{ target: 'OEBPS/Images/kuchie-004.jpg', asset: '../assets/v08-kuchie-future.jpg' }],
+};
+function applyVolumeImageOverride(files, volume) {
+  const rules = VOLUME_IMAGE_OVERRIDE[volume];
+  if (!rules) return;
+  for (const { target, asset } of rules) {
+    if (!files[target]) { console.warn(`  [image-override] 卷${volume}: 目标 ${target} 不在产物中（位置可能变，跳过）`); continue; }
+    const buf = fs.readFileSync(new URL(asset, import.meta.url));
+    files[target] = buf;
+    console.log(`  [image-override] 卷${volume}: ${target} ← ${asset} (${buf.length}B)`);
+  }
+}
+
 function resolveEpubRelativePath(baseFile, ref) {
   const clean = String(ref || '').split('#')[0].split('?')[0];
   if (!clean || /^[a-z]+:/i.test(clean)) return null;
@@ -696,6 +814,17 @@ async function loadSourceImages(sourceImageEpubPath) {
 // 台简自带台繁卷尾彩页（book.backImages），不需要日翻的卷尾跨页图（如 p288-291）。
 const SPECIAL_PAGE_RE = /^(specials\d*|special\d*)(\.xhtml)?$/;
 
+// 特典页来自 styleRef(日翻 healed),其 CSS/脚注图引用名随源结构而异:
+// 11-15 是 Sigil 式(../Styles/stylesheet.css + note.png),08 是 calibre 扁平式(../css.css、../page_css.css、note.webp)。
+// 统一改写到台简产物约定,否则 calibre 式引用会断链(CSS 不加载、脚注图破图)。对已正确的 13 幂等。
+function normalizeSpecialRefs(content) {
+  return content
+    // 连续的 stylesheet <link> 折叠成一条指向台简样式表的规范链接
+    .replace(/(?:<link\b[^>]*\.css"[^>]*>\s*)+/gi, '<link rel="stylesheet" type="text/css" href="../Styles/stylesheet.css"/>\n')
+    // 脚注图标统一用 note.png（台简图标约定）
+    .replace(/note\.webp/gi, 'note.png');
+}
+
 function collectSpecialEntries(styleRef) {
   if (!styleRef) return { pages: [], tocEntries: [], assetNames: [] };
 
@@ -723,7 +852,7 @@ function collectSpecialEntries(styleRef) {
       : `OEBPS/Text/${idref.replace(/\.xhtml$/, '')}.xhtml`;
     const rawContent = styleRef.entries[epubPath]?.toString('utf8');
     if (!rawContent) continue;
-    const content = selfCloseVoidTags(rawContent);
+    const content = normalizeSpecialRefs(selfCloseVoidTags(rawContent));
     const id = path.posix.basename(epubPath).replace(/\.xhtml$/, '');
 
     for (const imageRef of extractImageRefsFromXhtml(content)) {
@@ -1082,8 +1211,19 @@ export async function buildLightNovelEpubFromBook(book, {
     }
   }
   files['mimetype'] = Buffer.from('application/epub+zip');
+  // 强制 container.xml 指向构建实际写入的 OPF 位置（OEBPS/content.opf）。
+  // 否则会继承 styleRef 的 rootfile 路径——如 08 日翻源是 calibre 式根目录 content.opf，
+  // 继承后与 OEBPS/content.opf 不匹配，触发 epubcheck OPF-002 fatal（11-15 styleRef 恰好正确才没暴露）。
+  files['META-INF/container.xml'] = Buffer.from(
+    '<?xml version="1.0" encoding="UTF-8"?>\n'
+    + '<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">\n'
+    + '  <rootfiles>\n'
+    + '    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>\n'
+    + '  </rootfiles>\n'
+    + '</container>\n',
+  );
 
-  const styleTitleXhtml = selfCloseVoidTags(styleRef?.entries['OEBPS/Text/title.xhtml']?.toString('utf8') || null);
+  const styleTitleXhtml = buildStyleTitleXhtml(styleRef, volume, files);
   const styleSummaryXhtml = selfCloseVoidTags(styleRef?.entries['OEBPS/Text/summary.xhtml']?.toString('utf8') || null);
   const specials = includeSpecials
     ? collectSpecialEntries(styleRef)
@@ -1213,6 +1353,10 @@ export async function buildLightNovelEpubFromBook(book, {
 
   // 字体开源化：删旧子集字体、写思源子集、重写 CSS（manifest 随后扫描自动反映）
   await applyToFiles(files);
+  // vol-08：把章节标题/目次样式对齐到 13 台简（见 VOLUME_STYLE_ALIGN）
+  applyVolumeStyleAlign(files, volume);
+  // vol-08：开头插图「未来預想圖」改用 08 日翻版本（见 VOLUME_IMAGE_OVERRIDE）
+  applyVolumeImageOverride(files, volume);
 
   // 脚注图标处理：
   // 1. 被引用的 note.png 统一替换为 migrate 同款青绿图标（覆盖日翻红/绿版，全系列一致）；

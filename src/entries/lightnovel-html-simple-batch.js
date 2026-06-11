@@ -49,7 +49,7 @@ export function rubyAnnotationsForVolume(volume) {
 }
 
 function resolveSourceImageEpubPath(root, volume) {
-  if (volume === '11' || volume === '13') {
+  if (volume === '08' || volume === '11' || volume === '13') {
     const hyreadDir = path.join(root, 'output/hyread');
     if (fs.existsSync(hyreadDir)) {
       const hyreadSource = fs.readdirSync(hyreadDir, { withFileTypes: true })

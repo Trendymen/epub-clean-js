@@ -215,6 +215,81 @@ test('buildLightNovelEpub places epigraph page after TOC and before chapter one'
   }
 });
 
+test('buildLightNovelEpub normalizes flat style-ref title page to 13-style layout with volume 08 colors', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-html-flat-title-'));
+  const originalFetch = globalThis.fetch;
+  try {
+    const htmlPath = join(dir, '08.html');
+    const refPath = join(dir, 'ref.epub');
+    const styleRefPath = join(dir, 'style-ref-flat.epub');
+    const outPath = join(dir, 'out.epub');
+    await writeFile(htmlPath, SAMPLE_HTML, 'utf8');
+    await writeEpub(refPath, {
+      'META-INF/container.xml': '<container/>',
+      'OEBPS/Styles/stylesheet.css': '',
+      'OEBPS/Misc/script.js': '',
+    });
+    await writeEpub(styleRefPath, {
+      'Text/title.xhtml': `<html xmlns="http://www.w3.org/1999/xhtml">
+<head><link rel="stylesheet" type="text/css" href="../css.css"/></head>
+<body class="calibre1">
+<div class="title">
+<img alt="t1" src="../Images/t1.webp" class="calibre18"/>
+<img alt="t2" src="../Images/t2.webp" class="calibre19"/>
+<img alt="t3" src="../Images/t3.webp" class="calibre20"/>
+<img alt="t4" src="../Images/t4.webp" class="calibre21"/>
+</div>
+</body></html>`,
+      'Images/t1.webp': Buffer.from([11]),
+      'Images/t2.webp': Buffer.from([12]),
+      'Images/t3.webp': Buffer.from([13]),
+      'Images/t4.webp': Buffer.from([14]),
+    });
+
+    globalThis.fetch = async () => ({
+      ok: true,
+      headers: { get: () => 'image/jpeg' },
+      arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+    });
+
+    await buildLightNovelEpub({
+      htmlPath,
+      refEpubPath: refPath,
+      styleRefEpubPath: styleRefPath,
+      outEpubPath: outPath,
+      volume: '08',
+      modifiedIso: '2026-06-11T00:00:00.000Z',
+    });
+
+    const epub = await readEpub(outPath);
+    const title = epub.entries['OEBPS/Text/title.xhtml'].toString('utf8');
+    assert.match(title, /\.textbox\{font-family:[^}]*\}/);
+    assert.match(title, /\.textbox p\{[^}]*text-align:center[^}]*font-weight:bold/);
+    assert.match(title, /\.textbox \.c1\{font-size:0\.8em;color:#EB6161/);
+    assert.match(title, /\.textbox \.c2\{font-size:1\.1em;padding:0\.2em 0 1\.5em/);
+    assert.match(title, /\.textbox \.c3\{font-size:0\.8em;color:#E1C851/);
+    assert.match(title, /\.textbox \.c4\{font-size:1em;padding:0\.15em 0 0/);
+    assert.match(title, /<div class="center" style="margin:4em auto 1em;">/);
+    assert.match(title, /<div class="center" style="margin:1em auto 2.5em;">/);
+    assert.match(title, /<div class="textbox">/);
+    assert.match(title, /<p class="c1">作者<\/p>/);
+    assert.match(title, /<p class="c3">插画<\/p>/);
+    assert.match(title, /src="\.\.\/Images\/t1\.webp" style="width:13em;"/);
+    assert.match(title, /src="\.\.\/Images\/t2\.webp" style="width:1\.5em;"/);
+    assert.match(title, /src="\.\.\/Images\/t3\.webp" style="width:5em;"/);
+    assert.match(title, /src="\.\.\/Images\/t4\.webp" style="width:3em;"/);
+    assert.doesNotMatch(title, /center1|center2|calibre1[789]|calibre2[01]|css\.css|page_css\.css/);
+    assert.deepEqual([...epub.entries['OEBPS/Images/t1.webp']], [11]);
+    assert.deepEqual([...epub.entries['OEBPS/Images/t4.webp']], [14]);
+    const opf = epub.entries['OEBPS/content.opf'].toString('utf8');
+    assert.match(opf, /href="Images\/t1\.webp"/);
+    assert.match(opf, /href="Images\/t4\.webp"/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('buildLightNovelEpub can replace and supplement novel images from a source epub profile', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'ln-html-image-ref-'));
   const originalFetch = globalThis.fetch;

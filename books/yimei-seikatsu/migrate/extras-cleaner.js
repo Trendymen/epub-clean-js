@@ -59,7 +59,7 @@ const ILLUS_TEMPLATE = (imageFilename, alt) =>
 </html>
 `;
 
-const TITLE_TEMPLATE = (t1, t2, t3, t4) =>
+const TITLE_TEMPLATE = (t1, t2, t3, t4, numberWidth = '2.5em') =>
   `<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="zh" xmlns:epub="http://www.idpf.org/2007/ops">
@@ -81,7 +81,7 @@ const TITLE_TEMPLATE = (t1, t2, t3, t4) =>
    <p class="tilh"><img alt="t1" src="../Images/${t1}" style="width:13em;"/></p>
   </div>
   <div class="center" style="margin:1em auto 2.5em;">
-   <p class="tilh"><img alt="t2" src="../Images/${t2}" style="width:2.5em;"/></p>
+   <p class="tilh"><img alt="t2" src="../Images/${t2}" style="width:${numberWidth};"/></p>
   </div>
   <div class="textbox">
    <p class="c1">作者</p>
@@ -262,8 +262,8 @@ export function buildIllusXhtml(imageFilename, alt = 'illus') {
  * @param {string} t4
  * @returns {string}
  */
-export function buildTitleXhtml(t1, t2, t3, t4) {
-  return TITLE_TEMPLATE(t1, t2, t3, t4);
+export function buildTitleXhtml(t1, t2, t3, t4, { numberWidth = '2.5em' } = {}) {
+  return TITLE_TEMPLATE(t1, t2, t3, t4, numberWidth);
 }
 
 function resolveMessageOptions(urlOrOptions, logo) {

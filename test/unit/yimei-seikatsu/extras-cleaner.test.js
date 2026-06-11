@@ -82,12 +82,18 @@ test('buildTitleXhtml: 4 个图片引用 + textbox 样式', () => {
   assert.ok(html.includes('<p class="c1">作者</p>'));
   assert.ok(html.includes('<p class="c3">插画</p>'));
   assert.ok(html.includes('<title>标题</title>'));
+  assert.ok(html.includes('src="../Images/t2.webp" style="width:2.5em;"'));
+});
+
+test('buildTitleXhtml: 单数字卷号图可指定 1.5em 宽度', () => {
+  const html = buildTitleXhtml('t1.webp', 't2.webp', 't3.webp', 't4.webp', { numberWidth: '1.5em' });
+  assert.ok(html.includes('src="../Images/t2.webp" style="width:1.5em;"'));
 });
 
 test('buildTitleXhtml: 经字体内联重写后与 golden-py 一致', async () => {
   // golden-py 是管线最终产物：builder 输出还要过 font-subset 的内联 <style> 重映射
   const golden = await readFile(resolve(FIXTURES, 'title.xhtml'), 'utf8');
-  const generated = buildTitleXhtml('t1.webp', 't2.webp', 't3.webp', 't4.webp');
+  const generated = buildTitleXhtml('t1.webp', 't2.webp', 't3.webp', 't4.webp', { numberWidth: '1.5em' });
   assert.equal(hash(rewriteInlineStyles(generated)), hash(golden));
 });
 
