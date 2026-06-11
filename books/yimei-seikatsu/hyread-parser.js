@@ -284,21 +284,29 @@ export async function parseHyreadEpubToBook(sourceEpubPath, { volume, creditOver
     const tocTitle = tocFileToTitle.get(fileName);
 
     if (tocTitle) {
-      // 在 TOC 中 → 普通章节
-      chapters.push({ title: simplifyText(tocTitle), blocks });
+      // 在 TOC 中 → 普通章节。源章节正文首段就是大字标题（gfont 大号字），
+      // 会与渲染出的 h3 标题重复，hyread 路径需手动剥掉这段重复标题。
+      const title = simplifyText(tocTitle);
+      const titleKey = title.replace(/\s+/g, '');
+      const firstTextIdx = blocks.findIndex((b) => b.type === 'text');
+      if (firstTextIdx >= 0 && blocks[firstTextIdx].text.replace(/\s+/g, '') === titleKey) {
+        blocks.splice(firstTextIdx, 1);
+      }
+      chapters.push({ title, blocks });
     } else if (fileName === 'p-001.xhtml') {
       // p-001 不在 TOC 中，内容为卷首语 → preBlocks
       const textBlocks = blocks.filter((b) => b.type === 'text');
       preBlocks = textBlocks.length > 0 && textBlocks[0].text.length < 200 ? textBlocks : [];
     } else {
-      // 其他不在 TOC 中的（如 p-015 后记），按内容判断标题
-      const firstText = blocks.find((b) => b.type === 'text');
-      const rawTitle = firstText?.text?.trim() || '';
+      // 其他不在 TOC 中的（如 p-015 后记）：首段大字即标题，提升为 h3 并从正文剥除避免重复。
+      const firstTextIdx = blocks.findIndex((b) => b.type === 'text');
+      const rawTitle = firstTextIdx >= 0 ? blocks[firstTextIdx].text.trim() : '';
       let title = rawTitle;
       // 检测后记
       if (/^后记|^後記|^あとがき/.test(rawTitle)) {
         title = '后记';
       }
+      if (firstTextIdx >= 0) blocks.splice(firstTextIdx, 1);
       chapters.push({ title, blocks });
     }
   }
