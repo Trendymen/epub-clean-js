@@ -153,6 +153,30 @@ function parseChapterXhtml(xhtml) {
 /**
  * 从 hyread EPUB 读取并构建 book object。
  */
+/**
+ * 从 OPF 读取 spine 顺序，返回 itemref 对应的文件基名数组（spine 实际阅读顺序）。
+ * 用于区分 p-fmatter 彩页在正文之前（卷首）还是之后（卷尾）。
+ */
+function readSpineBasenames(entryMap) {
+  let opfName = null;
+  for (const name of entryMap.keys()) {
+    if (/\.opf$/i.test(name)) { opfName = name; break; }
+  }
+  if (!opfName) return [];
+  const xml = entryMap.get(opfName).toString('utf8');
+  const idToHref = new Map();
+  for (const m of xml.matchAll(/<item\b[^>]*\bid="([^"]+)"[^>]*\bhref="([^"]+)"/g)) idToHref.set(m[1], m[2]);
+  for (const m of xml.matchAll(/<item\b[^>]*\bhref="([^"]+)"[^>]*\bid="([^"]+)"/g)) {
+    if (!idToHref.has(m[2])) idToHref.set(m[2], m[1]);
+  }
+  const out = [];
+  for (const m of xml.matchAll(/<itemref\b[^>]*\bidref="([^"]+)"/g)) {
+    const href = idToHref.get(m[1]);
+    if (href) out.push(path.posix.basename(href));
+  }
+  return out;
+}
+
 export async function parseHyreadEpubToBook(sourceEpubPath, { volume, creditOverrides = {} } = {}) {
   const epub = await readEpub(sourceEpubPath);
 
@@ -206,23 +230,33 @@ export async function parseHyreadEpubToBook(sourceEpubPath, { volume, creditOver
     fileName: coverFileName,
   };
 
-  // == 4) 卷首彩插 ==
+  // == 4) 彩插（按源 spine 位置区分卷首/卷尾）==
+  // p-fmatter-NNN 文件名连续编号，但部分彩页（下一卷预告、封面展开等）在源 spine 里
+  // 排在正文（p-\d{3}）之后，属于卷尾彩页。必须按 OPF spine 顺序判断，不能只看文件名。
+  const spineNames = readSpineBasenames(entryMap);
+  const spinePos = new Map(spineNames.map((n, i) => [n, i]));
+  const chapterSpineIdxs = spineNames
+    .map((n, i) => (/^p-\d{3}\.xhtml$/.test(n) ? i : -1))
+    .filter((i) => i >= 0);
+  const lastChapterIdx = chapterSpineIdxs.length ? Math.max(...chapterSpineIdxs) : -1;
+
   const fmatterFiles = epub.names
     .filter((n) => new RegExp(`^${R}/xhtml/p-fmatter-\\d+\\.xhtml$`).test(n))
     .sort();
 
+  const toImageObjs = (fmPath) => extractImageHrefs(read(fmPath)).map((ref) => {
+    const base = path.posix.basename(ref.split('?')[0]);
+    const id = base.replace(/\.[^.]+$/, '');
+    return { type: 'image', src: `image/${base}`, width: 0, height: 0, alt: id, id, fileName: base };
+  });
+
+  // 无 spine 信息时回退到旧行为：全部归卷首。
   const frontImages = [];
+  const backFmatterImages = [];
   for (const fmPath of fmatterFiles) {
-    for (const ref of extractImageHrefs(read(fmPath))) {
-      const base = path.posix.basename(ref.split('?')[0]);
-      const id = base.replace(/\.[^.]+$/, '');
-      frontImages.push({
-        type: 'image', src: `image/${base}`,
-        width: 0, height: 0,
-        alt: id, id,
-        fileName: base,
-      });
-    }
+    const idx = spinePos.get(path.posix.basename(fmPath));
+    const isBack = idx !== undefined && lastChapterIdx >= 0 && idx > lastChapterIdx;
+    (isBack ? backFmatterImages : frontImages).push(...toImageObjs(fmPath));
   }
 
   // == 5) 逐章解析正文（按文件名映射到 TOC）==
@@ -283,6 +317,8 @@ export async function parseHyreadEpubToBook(sourceEpubPath, { volume, creditOver
       break;
     }
   }
+  // 源 spine 中排在正文之后的 p-fmatter 彩页（下一卷预告、封面展开等）接在卷尾。
+  backImages.push(...backFmatterImages);
 
   // == 8) 构建 sourceImages ==
   function imgObj(base, overrides = {}) {

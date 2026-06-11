@@ -176,14 +176,16 @@ test('buildLightNovelEpub places epigraph page after TOC and before chapter one'
       'pre.xhtml',
       'chapter0001.xhtml',
     ]);
-    assert.deepEqual(spine.slice(-6), [
+    // illus* 插图页（styleRef 的 illus0007 = 日翻卷尾跨页）不再被收入特典区；
+    // 卷尾插图改由 book.backImages（台繁源）提供，紧接特典正文页之后。
+    assert.deepEqual(spine.slice(-5), [
       'specials0001.xhtml',
       'special0001.xhtml',
       'special0002.xhtml',
-      'illus0007.xhtml',
-      'illus0008.xhtml',
-      'illus0009.xhtml',
+      'illus0002.xhtml',
+      'illus0003.xhtml',
     ]);
+    assert.ok(!spine.includes('illus0007.xhtml'), '日翻卷尾 illus0007 不应被收入');
     assert.match(epub.entries['OEBPS/Text/title.xhtml'].toString('utf8'), /STYLE TITLE/);
     assert.match(epub.entries['OEBPS/Text/summary.xhtml'].toString('utf8'), /STYLE SUMMARY/);
     assert.match(epub.entries['OEBPS/Text/TOC.xhtml'].toString('utf8'), /特典合集/);
@@ -196,9 +198,10 @@ test('buildLightNovelEpub places epigraph page after TOC and before chapter one'
     assert.ok(!epub.entries['OEBPS/Images/logo.png']);
     assert.doesNotMatch(epub.entries['OEBPS/Text/message.xhtml'].toString('utf8'), /class="logo"|alt="logo"/);
     assert.ok(epub.entries['OEBPS/Images/bonus.png']);
-    assert.ok(epub.entries['OEBPS/Images/bonus-illus.webp']);
-    assert.match(epub.entries['OEBPS/Text/illus0008.xhtml'].toString('utf8'), /kuchie-002\.jpg/);
-    assert.match(epub.entries['OEBPS/Text/illus0009.xhtml'].toString('utf8'), /kuchie-003\.jpg/);
+    // 日翻 illus0007 的卷尾图 bonus-illus.webp 不再被收入或打包
+    assert.ok(!epub.entries['OEBPS/Images/bonus-illus.webp']);
+    assert.match(epub.entries['OEBPS/Text/illus0002.xhtml'].toString('utf8'), /kuchie-002\.jpg/);
+    assert.match(epub.entries['OEBPS/Text/illus0003.xhtml'].toString('utf8'), /kuchie-003\.jpg/);
     assert.doesNotMatch(epub.entries['OEBPS/Text/chapter0003.xhtml'].toString('utf8'), /kuchie-00[23]\.jpg/);
     assert.match(epub.entries['OEBPS/Text/message.xhtml'].toString('utf8'), /<div class="message">/);
     assert.match(epub.entries['OEBPS/Text/message.xhtml'].toString('utf8'), /<p>图源<\/p>[\s\S]*<p>嘻嘻嘻<\/p>/);

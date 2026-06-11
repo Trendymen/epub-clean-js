@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
 import * as OpenCC from 'opencc-js';
 import { parseHTML } from 'linkedom';
@@ -17,6 +18,10 @@ const INLINE_NOTE_RE = /（[注註][：:]\s*((?:[^（）]|（[^（）]*）)+?)�
 
 const TEXT_MEDIA_TYPE = 'application/xhtml+xml';
 const XML_HEADER = '<?xml version="1.0" encoding="utf-8"?>';
+// 脚注标记统一用 migrate 管线同款青绿「注」图标（books/yimei-seikatsu/assets/note.png），
+// 覆盖各卷日翻 styleRef 自带的红/绿版本，保证 09-13 全系列一致。
+const FOOTNOTE_ICON_GREEN = fs.readFileSync(path.join(import.meta.dirname, '../assets/note.png'));
+
 const SPECIAL_TEXT_IDS = [
   'specials0001',
   'special0001',
@@ -24,7 +29,6 @@ const SPECIAL_TEXT_IDS = [
   'special0003',
   'special0004',
   'special0005',
-  'illus0007',
 ];
 const DEFAULT_CREDIT_OVERRIDES = { 图源: '嘻嘻嘻', 录入: '嘻嘻嘻' };
 const DEFAULT_RUBY_ANNOTATIONS_BY_VOLUME = {
@@ -682,13 +686,16 @@ async function loadSourceImages(sourceImageEpubPath) {
 }
 
 // 特典/番外页类型：特典合集封面 specials\d+、番外故事 special\d+、赠图 illus\d+。
-const SPECIAL_PAGE_RE = /^(specials\d*|special\d*|illus\d+)(\.xhtml)?$/;
+// 只收日翻的特典正文页（special*/specials*），不收 illus* 插图页：
+// 台简自带台繁卷尾彩页（book.backImages），不需要日翻的卷尾跨页图（如 p288-291）。
+const SPECIAL_PAGE_RE = /^(specials\d*|special\d*)(\.xhtml)?$/;
 
 function collectSpecialEntries(styleRef) {
   if (!styleRef) return { pages: [], tocEntries: [], assetNames: [] };
 
-  // 优先按 spine 顺序动态发现：从 specials0001 起到卷末，只取 special*/specials*/illus* 页
-  // （天然排除 nav/toc、polo、characters 等非特典页，也不会误收正文前的口绘 illus0001-N）。
+  // 优先按 spine 顺序动态发现：从 specials0001 起到卷末，只取 special*/specials* 特典正文页
+  // （天然排除 nav/toc、polo、characters 等非特典页；illus* 插图页一律不收——台简卷尾彩页
+  // 由 book.backImages 从台繁源提供，避免混入日翻卷尾跨页图如 p288-291.webp）。
   // 没有 OPF（合成 style-ref）时回退到硬编码 SPECIAL_TEXT_IDS。
   const spineInfo = parseStyleSpine(styleRef);
   const tocTitleMap = collectStyleTocTitles(styleRef);
@@ -1200,6 +1207,20 @@ export async function buildLightNovelEpubFromBook(book, {
 
   // 字体开源化：删旧子集字体、写思源子集、重写 CSS（manifest 随后扫描自动反映）
   await applyToFiles(files);
+
+  // 脚注图标处理：
+  // 1. 被引用的 note.png 统一替换为 migrate 同款青绿图标（覆盖日翻红/绿版，全系列一致）；
+  // 2. 未被任何正文引用的 note*（hyread 路径如 13 卷无脚注时的孤儿）删除。
+  const referencedImages = new Set();
+  for (const [name, buf] of Object.entries(files)) {
+    if (!/OEBPS\/Text\/.*\.xhtml$/.test(name)) continue;
+    for (const m of buf.toString('utf8').matchAll(/Images\/([^"')\s]+)/g)) referencedImages.add(m[1]);
+  }
+  if (referencedImages.has('note.png')) files['OEBPS/Images/note.png'] = FOOTNOTE_ICON_GREEN;
+  for (const name of Object.keys(files)) {
+    const m = name.match(/^OEBPS\/Images\/(note\d*\.[a-z0-9]+)$/i);
+    if (m && !referencedImages.has(m[1])) delete files[name];
+  }
 
   const copiedItems = Object.keys(files)
     .filter((name) => name.startsWith('OEBPS/Fonts/') || name.startsWith('OEBPS/Styles/') || name.startsWith('OEBPS/Misc/'))
