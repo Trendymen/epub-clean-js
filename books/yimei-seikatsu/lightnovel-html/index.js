@@ -36,6 +36,12 @@ const DEFAULT_RUBY_ANNOTATIONS_BY_VOLUME = {
     { text: '社会数据科学Social Data Science', base: '社会数据科学', ruby: 'Social Data Science' },
     { text: '社会资料科学Social Data Science', base: '社会数据科学', ruby: 'Social Data Science' },
   ],
+  // hyread 台繁源的三处 <ruby>，繁转简后正文被摊平成行内串，按摊平形态重建为真 ruby。
+  13: [
+    { text: '浅村Asamura', base: '浅村', ruby: 'Asamura' },
+    { text: '大山千春OoyamaChiharu', base: '大山千春', ruby: 'Ooyama Chiharu' },
+    { text: '水星我们学校', base: '水星', ruby: '我们学校' },
+  ],
 };
 
 function decodeHtmlEntities(input) {

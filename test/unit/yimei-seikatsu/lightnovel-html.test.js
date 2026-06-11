@@ -13,6 +13,7 @@ import {
   splitLightNovelBook,
   simplifyText,
 } from '../../../books/yimei-seikatsu/lightnovel-html/index.js';
+import { rubyAnnotationsForVolume } from '../../../src/entries/lightnovel-html-simple-batch.js';
 import { readEpub, writeEpub } from '../../../src/core/zip-io.js';
 
 const SAMPLE_HTML = `<!doctype html>
@@ -313,6 +314,60 @@ test('buildLightNovelEpub restores known ruby annotation in volume 11 body text'
       epub.entries['OEBPS/Text/chapter0001.xhtml'].toString('utf8'),
       /<ruby>社会数据科学<rt>Social Data Science<\/rt><\/ruby>学部/,
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('rubyAnnotationsForVolume returns the three known ruby rules for volume 13', () => {
+  assert.deepEqual(rubyAnnotationsForVolume('13'), [
+    { text: '浅村Asamura', base: '浅村', ruby: 'Asamura' },
+    { text: '大山千春OoyamaChiharu', base: '大山千春', ruby: 'Ooyama Chiharu' },
+    { text: '水星我们学校', base: '水星', ruby: '我们学校' },
+  ]);
+});
+
+test('buildLightNovelEpub restores the three known ruby annotations in volume 13 body text', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-html-ruby13-'));
+  const originalFetch = globalThis.fetch;
+  try {
+    const htmlPath = join(dir, '13.html');
+    const refPath = join(dir, 'ref.epub');
+    const outPath = join(dir, 'out.epub');
+    // 注入三处 hyread ruby 摊平后的繁体形态（淺村Asamura / 大山千春OoyamaChiharu / 水星我們學校），
+    // 经简化 + 卷13 ruby 规则后应重建为真 ruby。
+    const rubyHtml = SAMPLE_HTML.replace(
+      '　　暑假在昨天告終。',
+      '　　「淺村Asamura」「大山千春OoyamaChiharu」「水星我們學校」',
+    );
+    await writeFile(htmlPath, rubyHtml, 'utf8');
+    await writeEpub(refPath, {
+      'META-INF/container.xml': '<container/>',
+      'OEBPS/Styles/stylesheet.css': '',
+      'OEBPS/Misc/script.js': '',
+    });
+
+    globalThis.fetch = async () => ({
+      ok: true,
+      headers: { get: () => 'image/jpeg' },
+      arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+    });
+
+    await buildLightNovelEpub({
+      htmlPath,
+      refEpubPath: refPath,
+      outEpubPath: outPath,
+      volume: '13',
+      includeSpecials: false,
+      modifiedIso: '2026-06-08T00:00:00.000Z',
+    });
+
+    const epub = await readEpub(outPath);
+    const chapter = epub.entries['OEBPS/Text/chapter0001.xhtml'].toString('utf8');
+    assert.match(chapter, /<ruby>浅村<rt>Asamura<\/rt><\/ruby>/);
+    assert.match(chapter, /<ruby>大山千春<rt>Ooyama Chiharu<\/rt><\/ruby>/);
+    assert.match(chapter, /<ruby>水星<rt>我们学校<\/rt><\/ruby>/);
   } finally {
     globalThis.fetch = originalFetch;
     await rm(dir, { recursive: true, force: true });
