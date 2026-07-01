@@ -216,12 +216,12 @@ function renderChapterXhtml(chapter, { rubyAnnotations = [] } = {}) {
   const [mainTitle, subtitle] = splitHeading(chapter.title);
   // 合并为单行 h3（匹配 healed 日翻版风格），有副标题时用全角空格连接
   const merged = subtitle ? `${mainTitle}　${subtitle}` : mainTitle;
-  const heading = ` <h3>${escapeXml(merged)}</h3>`;
+  const heading = merged ? ` <h3>${escapeXml(merged)}</h3>` : '';
 
   const state = { counter: 1, asides: [], rubyAnnotations };
   const body = renderBlocks(chapter.blocks, state);
   const footnotes = state.asides.length > 0 ? `\n${state.asides.join('')}` : '';
-  return xhtml(chapter.title, `${heading}\n${body}${footnotes}`);
+  return xhtml(chapter.title, [heading, body].filter(Boolean).join('\n') + footnotes);
 }
 
 function renderCoverXhtml(coverImage) {
@@ -303,12 +303,77 @@ function renderPreXhtml(book) {
   return xhtml('', `${blankLines}\n <p><b>${escapeXml(text)}</b></p>`);
 }
 
-function renderTocXhtml(tocEntries) {
+function flattenTocEntries(entries) {
+  return entries.flatMap((entry) => [
+    { title: entry.title, href: entry.href },
+    ...flattenTocEntries(entry.children || []),
+  ]);
+}
+
+function renderAnotherDaysTocTitle(title) {
+  const normalized = normalizeTitle(title);
+  const anime = normalized.match(/^动画义妹生活第(.+?)集随笔（三河ごーすと感想）$/);
+  if (anime) {
+    return `<p><span class="dbox">动画</span><span class="em05"> </span>义<span class="c1">妹</span>生活第${escapeXml(anime[1])}话的感想</p>
+  <p class="ctit">（三河ごーすと感想）</p>`;
+  }
+
+  const sideStory = normalized.match(/^外传小说《(.+?)》(.+)$/);
+  if (sideStory) {
+    return `<p><span class="ebox">外传小说</span><span class="em05"> </span>「${escapeXml(sideStory[1])}」${escapeXml(sideStory[2])}</p>`;
+  }
+
+  return `<p class="em095">${escapeXml(normalized)}</p>`;
+}
+
+function renderAnotherDaysTocXhtml(tocEntries, styleRef) {
+  const source = styleRef?.entries['OEBPS/Text/TOC.xhtml']?.toString('utf8');
+  if (!source) return null;
+
+  const style = source.match(/<style\b[^>]*>([\s\S]*?)<\/style>/i)?.[1]?.trim();
+  if (!style) return null;
+  const bodyAttrs = source.match(/<body\b([^>]*)>/i)?.[1] || ' bgcolor="#ddd"';
+  const containerAttrs = source.match(/<body\b[^>]*>\s*<div\b([^>]*)>/i)?.[1]
+    || ' style="margin:0 auto 1em;width:fit-content;-webkit-transform:rotate(-2deg);transform:rotate(-2deg);transform-origin:center;"';
+  const rows = flattenTocEntries(tocEntries)
+    .map((entry) => ` <div class="toc">
+  <a href="${escapeXml(path.posix.basename(entry.href))}">
+  ${renderAnotherDaysTocTitle(entry.title)}
+  </a>
+ </div>`)
+    .join('\n');
+
+  return `${XML_HEADER}
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="zh" xmlns:epub="http://www.idpf.org/2007/ops" xmlns:xml="http://www.w3.org/XML/1998/namespace">
+<head>
+ <title>目录</title>
+ <link href="../Styles/stylesheet.css" type="text/css" rel="stylesheet"/>
+ <script type="text/javascript" src="../Misc/script.js"></script>
+ <style>
+ ${style}
+ </style>
+</head>
+<body${bodyAttrs}>
+<div${containerAttrs}>
+ <h3 class="ctt">Contents</h3>
+${rows}
+</div>
+</body>
+</html>`;
+}
+
+function renderTocXhtml(tocEntries, { styleRef = null, volume = null } = {}) {
+  if (volume === 'another-days') {
+    const styleToc = renderAnotherDaysTocXhtml(tocEntries, styleRef);
+    if (styleToc) return styleToc;
+  }
+
   const style = 'body{-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none;}'
     + '.ctt{font-family:ctt2,emoji,sym;text-align:center;font-size:1.8em;margin:1em 0;font-weight:bold;}'
     + '.toc{margin:1em 0 0.5em;text-align:center;border-left:0;}'
     + '.toc a{display:block;font-family:ctt1,emoji,sym;padding:0.25em;}';
-  const rows = tocEntries
+  const rows = flattenTocEntries(tocEntries)
     .map((entry) => ` <div class="toc">
   <a href="${escapeXml(path.posix.basename(entry.href))}">
   <p>${escapeXml(entry.title)}</p>
@@ -331,7 +396,7 @@ function renderTocXhtml(tocEntries) {
     + '</html>';
 }
 
-function renderNavXhtml(entries, { hasSummary = false } = {}) {
+function renderNavXhtml(entries, { hasSummary = false, bodyHref = 'pre.xhtml' } = {}) {
   const renderEntry = (entry, indent = '      ') => {
     const link = `${indent}<li><a href="${escapeXml(path.posix.basename(entry.href))}">${escapeXml(entry.title)}</a>`;
     if (!entry.children?.length) return `${link}</li>`;
@@ -362,11 +427,42 @@ ${rows}
     <ol>
       <li><a epub:type="cover" href="cover.xhtml">封面</a></li>
 ${summaryLandmark}      <li><a epub:type="toc" href="TOC.xhtml">目录</a></li>
-      <li><a epub:type="bodymatter" href="pre.xhtml">题记</a></li>
+      <li><a epub:type="bodymatter" href="${escapeXml(bodyHref)}">正文</a></li>
     </ol>
   </nav>
 </body>
 </html>`;
+}
+
+function planChapterRendering(book) {
+  let nextIllusIndex = (book.frontImages.length || 0) + 1;
+  const plans = book.chapters.map((chapter, index) => {
+    const id = `chapter${String(index + 1).padStart(4, '0')}.xhtml`;
+    const href = `Text/${id}`;
+    const leadingImages = [];
+    let i = 0;
+    while (i < chapter.blocks.length && chapter.blocks[i].type === 'image') {
+      leadingImages.push(chapter.blocks[i]);
+      i++;
+    }
+    const bodyBlocks = chapter.blocks.slice(i);
+    const leadingImagePages = leadingImages.map((image) => {
+      const illusId = `illus${String(nextIllusIndex).padStart(4, '0')}.xhtml`;
+      nextIllusIndex += 1;
+      return { id: illusId, href: `Text/${illusId}`, image };
+    });
+    const hasChapterPage = bodyBlocks.length > 0 || chapter.title;
+    return {
+      chapter,
+      id,
+      href,
+      bodyBlocks,
+      leadingImagePages,
+      hasChapterPage,
+      navHref: leadingImagePages[0]?.href || (hasChapterPage ? href : null),
+    };
+  });
+  return { plans, nextIllusIndex };
 }
 
 function renderTocNcx({ title, uuid, entries }) {
@@ -911,7 +1007,7 @@ function uniqueManifestItems(items) {
   return out;
 }
 
-function buildContentOpf({ title, volume, uuid, modifiedIso, manifestItems, spineItems, hasSummary = false }) {
+function buildContentOpf({ title, volume, uuid, modifiedIso, manifestItems, spineItems, hasSummary = false, hasPre = false }) {
   const manifest = manifestItems
     .map((item) => `    <item id="${escapeXml(item.id)}" href="${escapeXml(item.href)}" media-type="${escapeXml(item.mediaType)}"${item.properties ? ` properties="${escapeXml(item.properties)}"` : ''}/>`)
     .join('\n');
@@ -920,6 +1016,9 @@ function buildContentOpf({ title, volume, uuid, modifiedIso, manifestItems, spin
     .join('\n');
   const summaryGuide = hasSummary
     ? '    <reference type="introduction" title="简介" href="Text/summary.xhtml"/>\n'
+    : '';
+  const preGuide = hasPre
+    ? '    <reference type="text" title="题记" href="Text/pre.xhtml"/>\n'
     : '';
 
   return `${XML_HEADER}
@@ -947,7 +1046,7 @@ ${spine}
   </spine>
   <guide>
     <reference type="cover" title="封面" href="Text/cover.xhtml"/>
-${summaryGuide}    <reference type="text" title="题记" href="Text/pre.xhtml"/>
+${summaryGuide}${preGuide}
     <reference type="toc" title="目录" href="Text/TOC.xhtml"/>
   </guide>
 </package>`;
@@ -1274,26 +1373,30 @@ export async function buildLightNovelEpubFromBook(book, {
     );
   });
 
-  const chapterEntries = book.chapters.map((chapter, index) => {
-    const id = `chapter${String(index + 1).padStart(4, '0')}.xhtml`;
-    const href = `Text/${id}`;
-    return { title: chapter.title, href };
+  const chapterRendering = planChapterRendering(book);
+  const chapterEntries = chapterRendering.plans.flatMap((plan) => {
+    if (plan.chapter.includeInToc === false || !plan.navHref) return [];
+    return [{ title: plan.chapter.title, href: plan.navHref }];
   });
   const specialGroup = specials.tocEntries.length > 0
     ? {
-        title: specials.tocEntries[0].title,
+        title: /^插[图圖]$/.test(specials.tocEntries[0].title || '') && specials.tocEntries.length > 1
+          ? '特典合集'
+          : specials.tocEntries[0].title,
         href: specials.tocEntries[0].href,
         children: specials.tocEntries.slice(1),
       }
     : null;
 
+  const hasPre = book.preBlocks.length > 0;
+  const preEntry = hasPre ? [{ title: '题记', href: 'Text/pre.xhtml' }] : [];
   const tocEntries = [
     { title: '封面', href: 'Text/cover.xhtml' },
     { title: '标题', href: 'Text/title.xhtml' },
     { title: '制作信息', href: 'Text/message.xhtml' },
     ...(styleSummaryXhtml ? [{ title: '简介', href: 'Text/summary.xhtml' }] : []),
     { title: '目录', href: 'Text/TOC.xhtml' },
-    { title: '题记', href: 'Text/pre.xhtml' },
+    ...preEntry,
     ...chapterEntries,
     ...(specialGroup ? [specialGroup] : []),
   ];
@@ -1301,25 +1404,29 @@ export async function buildLightNovelEpubFromBook(book, {
 
   addText('TOC.xhtml', 'Text/TOC.xhtml', renderTocXhtml([
     ...chapterEntries,
-    ...specials.tocEntries,
-  ]));
+    ...(specialGroup ? [specialGroup] : []),
+  ], { styleRef, volume }));
 
-  if (book.preBlocks.length > 0) {
+  if (hasPre) {
     addText('pre.xhtml', 'Text/pre.xhtml', renderPreXhtml(book));
   }
 
-  book.chapters.forEach((chapter, index) => {
-    const id = `chapter${String(index + 1).padStart(4, '0')}.xhtml`;
-    const href = `Text/${id}`;
-    addText(id, href, renderChapterXhtml(chapter, { rubyAnnotations }));
-  });
+  for (const plan of chapterRendering.plans) {
+    for (const page of plan.leadingImagePages) {
+      addText(page.id, page.href, renderImagePage(page.image), 'scripted', 'duokan-page-fitwindow');
+    }
+    // 仅当剩余有正文块或标题时输出章节页（纯彩插章不产生空 chapter）
+    if (plan.hasChapterPage) {
+      addText(plan.id, plan.href, renderChapterXhtml({ title: plan.chapter.title, blocks: plan.bodyBlocks }, { rubyAnnotations }));
+    }
+  }
 
   for (const page of specials.pages) {
     addText(`${page.id}.xhtml`, page.href, page.content, 'scripted', page.spineProperties);
   }
 
   const usedIllustrationNumbers = [
-    book.frontImages.length,
+    chapterRendering.nextIllusIndex - 1,
     ...specials.pages
       .map((page) => page.id.match(/^illus(\d+)$/)?.[1])
       .filter(Boolean)
@@ -1332,7 +1439,11 @@ export async function buildLightNovelEpubFromBook(book, {
     nextBackImageIndex += 1;
   }
 
-  addText('toc', 'Text/navigation-documents.xhtml', renderNavXhtml(navEntries, { hasSummary: Boolean(styleSummaryXhtml) }), 'nav', false);
+  const bodyHref = path.posix.basename((hasPre ? 'Text/pre.xhtml' : chapterEntries[0]?.href) || 'Text/TOC.xhtml');
+  addText('toc', 'Text/navigation-documents.xhtml', renderNavXhtml(navEntries, {
+    hasSummary: Boolean(styleSummaryXhtml),
+    bodyHref,
+  }), 'nav', false);
 
   files['OEBPS/toc.ncx'] = renderTocNcx({
     title: book.title,
@@ -1416,6 +1527,7 @@ export async function buildLightNovelEpubFromBook(book, {
     manifestItems,
     spineItems,
     hasSummary: Boolean(styleSummaryXhtml),
+    hasPre,
   });
 
   await writeEpub(outEpubPath, files);

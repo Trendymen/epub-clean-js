@@ -194,6 +194,79 @@ function parseChapterXhtml(xhtml) {
 }
 
 /**
+ * parseAnotherDaysChapterXhtml — readmoo another days 正文页解析。
+ *
+ * readmoo 正文 <p> 的 class 是纯字体度量（moofs16 moolh28），没有 hyread 的
+ * __reader-text-indent__/paragraph-spacing 类，通用 parseChapterXhtml 的 BODY_P_CSS_RE
+ * 无法识别 → 正文全丢。本函数放宽正文段判定：非 mfont 标记段、非 mokuji 锚点、
+ * 非 spacer、有文字内容即视为正文段。标题/图片/SVG 逻辑与 parseChapterXhtml 一致。
+ */
+function parseAnotherDaysChapterXhtml(xhtml) {
+  const blocks = [];
+  let headingText = null;
+  const { document } = parseHTML(xhtml);
+  const main = document.querySelector('.main');
+  if (!main) return { blocks, headingText };
+
+  for (const child of main.childNodes) {
+    if (child.nodeType !== 1) continue;
+    const tag = (child.localName || child.tagName || '').toLowerCase();
+
+    if (tag === 'p') {
+      const html = (child.outerHTML || child.toString?.() || '');
+      if (/^\s*<p\b[^>]*\bid\s*=\s*["']mokuji-/.test(html)) continue;
+
+      const cls = child.getAttribute('class') || '';
+      // mfont 段是标记/空段（如 font-1em10 小字标记），readmoo 正文段是 moofs*/moolh*
+      if (/\bmfont\b/.test(cls) && !/font-1em40/.test(html)) continue;
+
+      const text = (child.textContent || '').trim();
+      if (/^[　\s]*$/.test(text) && child.querySelector('br')) continue;
+
+      // 大字标题（gfont font-1em40）抽作 headingText
+      if (headingText === null && /font-1em40/.test(html)) {
+        const ht = (child.textContent || '').replace(/\s+/g, '');
+        if (ht) { headingText = ht; continue; }
+      }
+
+      // 内嵌图片
+      const img = child.querySelector('img');
+      if (img) {
+        const base = path.posix.basename((img.getAttribute('src') || '').split('?')[0]);
+        const imgCls = img.getAttribute('class') || '';
+        const isInlineGlyph = /\bheight-1em\b/.test(imgCls)
+          || Object.prototype.hasOwnProperty.call(RARE_CHAR_IMAGE_MAP, base);
+        if (isInlineGlyph) {
+          const inlineText = buildInlineText(child).replace(/\s+/g, '');
+          if (inlineText) blocks.push({ type: 'text', text: inlineText, bold: false });
+          continue;
+        }
+        if (base) {
+          const id = base.replace(/\.[^.]+$/, '');
+          blocks.push({ type: 'image', src: `image/${base}`, width: 0, height: 0, alt: id, id, fileName: base });
+        }
+        continue;
+      }
+
+      // 正文段：有文字即取（readmoo 无 __reader-* 类，靠排除标记段后的有文字 p）
+      const rawText = (child.textContent || '').replace(/\s+/g, '');
+      if (rawText) blocks.push({ type: 'text', text: rawText, bold: false });
+      continue;
+    }
+
+    if (tag === 'svg') {
+      const svgHtml = (child.outerHTML || child.toString?.() || '');
+      for (const ref of extractImageHrefs(svgHtml)) {
+        const base = path.posix.basename(ref.split('?')[0]);
+        const id = base.replace(/\.[^.]+$/, '');
+        blocks.push({ type: 'image', src: `image/${base}`, width: 0, height: 0, alt: id, id, fileName: base });
+      }
+    }
+  }
+  return { blocks, headingText };
+}
+
+/**
  * 从 hyread EPUB 读取并构建 book object。
  */
 /**
@@ -409,6 +482,210 @@ export async function parseHyreadEpubToBook(sourceEpubPath, { volume, creditOver
     preBlocks,
     summaryBlocks: preBlocks,
     tocTitles,
+    chapters,
+    _sourceImages: sourceImages,
+  };
+}
+
+/**
+ * parseAnotherDaysEpubToBook — 义妹生活 another days 短篇合集专用 parser。
+ *
+ * another days 是短篇合集（12 篇动画感想 + 外传小说 + 后记 + 5 特典），结构与
+ * 11-13 卷长篇模型根本不同：每个短篇在源 spine 里是「p-fmatter-NNN 彩插页（纯 SVG 图）
+ * + p-NNN 正文页」紧邻成对，且章节标题只在 nav TOC 里（href 指向 p-fmatter-NNN），
+ * 正文页自身没有 font-1em40 大字标题。
+ *
+ * 通用 parseHyreadEpubToBook 把所有 p-fmatter 当彩插抽进 frontImages/backImages 扁平数组，
+ * 丢失与配对正文的 spine 邻接关系，导致构建器把彩插连续堆叠、章节标题全空。
+ *
+ * 本 parser 按 spine 顺序遍历，把每个 p-fmatter 彩插 prepend 到配对 p-NNN 章节的 blocks
+ * 头部，保留穿插位置；卷首彩插（p-001 之前）归 frontImages，卷尾彩插（最后章节之后）
+ * 归 backImages。构建器再把章节头部连续 image block 拆成独立 illus 页，还原源排版。
+ *
+ * 复用 parseHyreadEpubToBook 的全部工具函数与 book 对象契约。
+ */
+export async function parseAnotherDaysEpubToBook(sourceEpubPath, { volume = 'another-days', creditOverrides = {} } = {}) {
+  const epub = await readEpub(sourceEpubPath);
+  const entryMap = new Map();
+  for (const name of epub.names) entryMap.set(name, epub.entries[name]);
+
+  function read(name) {
+    const entry = entryMap.get(name);
+    if (!entry) throw new Error(`Missing entry in readmoo EPUB: ${name}`);
+    return entry.toString('utf8');
+  }
+  function imgEntry(fileName) {
+    const p = `${R}/image/${fileName}`;
+    const entry = entryMap.get(p);
+    if (!entry) throw new Error(`Missing image in readmoo EPUB: ${p}`);
+    return entry;
+  }
+  function imgObj(base, overrides = {}) {
+    const fileName = base;
+    return {
+      type: 'image', src: `image/${fileName}`,
+      width: 0, height: 0,
+      alt: fileName.replace(/\.[^.]+$/, ''),
+      id: fileName.replace(/\.[^.]+$/, ''),
+      fileName,
+      mediaType: fileName.endsWith('.png') ? 'image/png'
+        : fileName.endsWith('.webp') ? 'image/webp'
+        : 'image/jpeg',
+      buffer: imgEntry(fileName),
+      ...overrides,
+    };
+  }
+
+  // == 1) TOC：href 可能指向 p-fmatter-NNN.xhtml（短篇彩插页）或 p-NNN.xhtml#mokuji（前言/后记）==
+  // parseTocEntries 返回的 href 可能带 "xhtml/" 前缀，统一取 basename 与 spine 名匹配。
+  const tocEntries = parseTocEntries(read(`${R}/xhtml/p-toc-001.xhtml`));
+  const tocHrefToTitle = new Map(tocEntries.map((e) => [path.posix.basename(e.href), e.title]));
+
+  // == 2) 版权信息 ==
+  const creditBlocks = parseColophonBlocks(read(`${R}/xhtml/p-colophon.xhtml`));
+  if (creditOverrides && Object.keys(creditOverrides).length > 0) {
+    for (const [key, value] of Object.entries(creditOverrides)) {
+      const idx = creditBlocks.findIndex((b) => {
+        const m = b.text.match(/^(.+?)[：:]/);
+        return m && m[1].trim() === key;
+      });
+      if (idx >= 0) creditBlocks.splice(idx, 1);
+      creditBlocks.push({ type: 'text', text: `${key}：${value}`, bold: false });
+    }
+  }
+
+  // == 3) 封面 ==
+  const coverHrefs = extractImageHrefs(read(`${R}/xhtml/p-cover.xhtml`));
+  if (coverHrefs.length === 0) throw new Error('No cover image found in readmoo EPUB');
+  const coverFileName = path.posix.basename(coverHrefs[0].split('?')[0]);
+  const coverImage = {
+    type: 'image', src: `image/${coverFileName}`,
+    width: 0, height: 0, alt: 'cover', id: 'cover', fileName: coverFileName,
+  };
+
+  // == 4) 按 spine 顺序遍历，建立彩插-正文配对 ==
+  const spineNames = readSpineBasenames(entryMap);
+  const fmatterRe = /^p-fmatter-(\d+)\.xhtml$/;
+  const chapterRe = /^p-(\d{3})\.xhtml$/;
+
+  const frontImages = [];      // 卷首彩插（p-001 之前的 p-fmatter）
+  const backImages = [];       // 卷尾彩插（最后章节之后的 p-fmatter）
+  const chapters = [];         // {title, blocks}
+  let preBlocks = [];
+
+  // 短篇正文 p-NNN 的章节标题：nav href 指向配对 p-fmatter-NNN，需建立 fmatter basename→title 映射
+  const fmatterTitleMap = new Map();
+  for (const e of tocEntries) {
+    const base = path.posix.basename(e.href);
+    if (fmatterRe.test(base)) fmatterTitleMap.set(base, e.title);
+  }
+
+  let pendingFmatterBlocks = [];  // 待配对彩插 image block（prepend 到下一个正文章节）
+  let seenAnyChapter = false;     // 是否已遇到首个 p-NNN 正文
+  let lastChapterIndex = -1;      // 最后一个 p-NNN 在 spine 中的位置
+  for (let i = 0; i < spineNames.length; i++) {
+    if (chapterRe.test(spineNames[i])) lastChapterIndex = i;
+  }
+
+  for (let i = 0; i < spineNames.length; i++) {
+    const name = spineNames[i];
+
+    if (fmatterRe.test(name)) {
+      // 彩插页：解析为 image block
+      const blocks = extractImageHrefs(read(`${R}/xhtml/${name}`)).map((ref) => {
+        const base = path.posix.basename(ref.split('?')[0]);
+        const id = base.replace(/\.[^.]+$/, '');
+        return { type: 'image', src: `image/${base}`, width: 0, height: 0, alt: id, id, fileName: base };
+      });
+      if (!seenAnyChapter) {
+        // p-001 之前 → 卷首彩插
+        frontImages.push(...blocks);
+      } else if (i > lastChapterIndex) {
+        // 最后章节之后 → 卷尾彩插
+        backImages.push(...blocks);
+      } else {
+        // 短篇配对彩插 → 待 prepend 到下一个正文章节
+        pendingFmatterBlocks.push(...blocks);
+      }
+      continue;
+    }
+
+    if (chapterRe.test(name)) {
+      seenAnyChapter = true;
+      const { blocks, headingText } = parseAnotherDaysChapterXhtml(read(`${R}/xhtml/${name}`));
+      for (const b of blocks) {
+        if (b.type === 'text') b.text = simplifyText(b.text);
+      }
+      // 头部插入配对彩插
+      const allBlocks = [...pendingFmatterBlocks, ...blocks];
+      pendingFmatterBlocks = [];
+
+      // 标题优先级：nav href 指向本 p-NNN > nav href 指向配对 p-fmatter > headingText。
+      // 没有源目录/标题的中间页（如 p-007）保留正文，但不能用首段伪造目录项。
+      let includeInToc = false;
+      let title = tocHrefToTitle.get(name);
+      if (title) {
+        includeInToc = true;
+      } else {
+        // 找前一个紧邻的 p-fmatter（配对彩插）的 nav 标题
+        for (let j = i - 1; j >= 0; j--) {
+          const prev = spineNames[j];
+          if (fmatterRe.test(prev)) {
+            title = fmatterTitleMap.get(prev);
+            if (title) includeInToc = true;
+            break;
+          }
+          if (chapterRe.test(prev)) break; // 遇到上一个正文就停
+        }
+      }
+      if (!title) {
+        const rawTitle = headingText ? simplifyText(headingText) : '';
+        title = /^后记|^後記|^あとがき/.test(rawTitle) ? '后记' : rawTitle;
+        includeInToc = Boolean(title);
+      } else {
+        title = simplifyText(title);
+      }
+
+      // p-001 不在 TOC 且无配对彩插标题 → 卷首语 preBlocks（仅取首段且 <200 字）
+      const inToc = tocHrefToTitle.has(name);
+      if (!inToc && name === 'p-001.xhtml' && !title) {
+        const textBlocks = allBlocks.filter((b) => b.type === 'text');
+        if (textBlocks.length > 0 && textBlocks[0].text.length < 200) {
+          preBlocks = textBlocks;
+          continue;
+        }
+      }
+
+      chapters.push({ title: title || '', blocks: allBlocks, includeInToc });
+      continue;
+    }
+  }
+
+  // == 5) 构建 sourceImages ==
+  const sourceImages = {
+    cover: imgObj(coverFileName, { id: 'cover', fileName: 'cover.jpg', mediaType: 'image/jpeg' }),
+    front: frontImages.map((img) => imgObj(img.fileName)),
+    body: [],
+    back: backImages.map((img) => imgObj(img.fileName)),
+  };
+  for (const chapter of chapters) {
+    for (const block of chapter.blocks) {
+      if (block.type === 'image') sourceImages.body.push(imgObj(block.fileName));
+    }
+  }
+
+  return {
+    title: `义妹生活 ${volume} [台简]`,
+    volume,
+    author: '三河ごーすと',
+    illustrator: 'Hiten',
+    coverImage,
+    frontImages,
+    backImages,
+    creditBlocks,
+    preBlocks,
+    summaryBlocks: preBlocks,
+    tocTitles: tocEntries.map((e) => simplifyText(e.title)),
     chapters,
     _sourceImages: sourceImages,
   };

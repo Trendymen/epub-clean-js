@@ -8,6 +8,7 @@ import { XMLParser } from 'fast-xml-parser';
 
 import {
   buildLightNovelEpub,
+  buildLightNovelEpubFromBook,
   extractArticleHtml,
   parseLightNovelArticle,
   splitLightNovelBook,
@@ -211,6 +212,159 @@ test('buildLightNovelEpub places epigraph page after TOC and before chapter one'
     assert.doesNotMatch(epub.entries['OEBPS/Text/chapter0001.xhtml'].toString('utf8'), /可贵的爱情与罪恶的快乐。/);
   } finally {
     globalThis.fetch = originalFetch;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('buildLightNovelEpubFromBook keeps unlisted chapters in spine but out of every TOC', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-html-unlisted-chapter-'));
+  try {
+    const refPath = join(dir, 'ref.epub');
+    const outPath = join(dir, 'out.epub');
+    await writeEpub(refPath, {
+      'META-INF/container.xml': '<container/>',
+      'OEBPS/Styles/stylesheet.css': '',
+      'OEBPS/Misc/script.js': '',
+    });
+
+    await buildLightNovelEpubFromBook({
+      title: '义妹生活 another days [台简]',
+      volume: 'another-days',
+      author: '三河ごーすと',
+      illustrator: 'Hiten',
+      coverImage: { type: 'image', fileName: 'cover.jpg', src: 'image/cover.jpg', id: 'cover', alt: 'cover' },
+      frontImages: [],
+      backImages: [],
+      preBlocks: [],
+      summaryBlocks: [],
+      creditBlocks: [],
+      chapters: [
+        { title: '动画义妹生活第５集随笔（三河ごーすと感想）', blocks: [{ type: 'text', text: '第五集正文。' }] },
+        { title: '', includeInToc: false, blocks: [{ type: 'text', text: '不过嘛，她是个擅长撒谎的人，所以也可能只是藏得很好。' }] },
+        { title: '动画义妹生活第６集随笔（三河ごーすと感想）', blocks: [{ type: 'text', text: '第六集正文。' }] },
+      ],
+    }, {
+      refEpubPath: refPath,
+      outEpubPath: outPath,
+      includeSpecials: false,
+      sourceImages: {
+        cover: { type: 'image', fileName: 'cover.jpg', src: 'image/cover.jpg', id: 'cover', alt: 'cover', mediaType: 'image/jpeg', buffer: Buffer.from([1]) },
+        front: [],
+        body: [],
+        back: [],
+      },
+      modifiedIso: '2026-07-01T00:00:00.000Z',
+    });
+
+    const epub = await readEpub(outPath);
+    const toc = epub.entries['OEBPS/Text/TOC.xhtml'].toString('utf8');
+    const nav = epub.entries['OEBPS/Text/navigation-documents.xhtml'].toString('utf8');
+    const ncx = epub.entries['OEBPS/toc.ncx'].toString('utf8');
+    const opf = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' })
+      .parse(epub.entries['OEBPS/content.opf'].toString('utf8')).package;
+    const spine = (Array.isArray(opf.spine.itemref) ? opf.spine.itemref : [opf.spine.itemref])
+      .map((item) => item['@_idref']);
+
+    assert.ok(spine.includes('chapter0002.xhtml'), 'unlisted chapter should remain in spine');
+    assert.match(epub.entries['OEBPS/Text/chapter0002.xhtml'].toString('utf8'), /不过嘛，她是个擅长撒谎的人/);
+    assert.doesNotMatch(epub.entries['OEBPS/Text/chapter0002.xhtml'].toString('utf8'), /<h3>\s*<\/h3>/);
+    assert.doesNotMatch(toc, /不过嘛，她是个擅长撒谎的人/);
+    assert.doesNotMatch(nav, /不过嘛，她是个擅长撒谎的人/);
+    assert.doesNotMatch(ncx, /不过嘛，她是个擅长撒谎的人/);
+    assert.match(toc, /动画义妹生活第５集随笔/);
+    assert.match(toc, /动画义妹生活第６集随笔/);
+    assert.doesNotMatch(epub.entries['OEBPS/content.opf'].toString('utf8'), /Text\/pre\.xhtml/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('buildLightNovelEpubFromBook uses leading illustration pages as another-days TOC targets', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-html-another-days-toc-'));
+  try {
+    const refPath = join(dir, 'ref.epub');
+    const styleRefPath = join(dir, 'style-ref.epub');
+    const outPath = join(dir, 'out.epub');
+    await writeEpub(refPath, {
+      'META-INF/container.xml': '<container/>',
+      'OEBPS/Styles/stylesheet.css': '',
+      'OEBPS/Misc/script.js': '',
+    });
+    await writeEpub(styleRefPath, {
+      'OEBPS/Text/TOC.xhtml': `<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="zh" xmlns:epub="http://www.idpf.org/2007/ops" xmlns:xml="http://www.w3.org/XML/1998/namespace">
+<head>
+ <title>目录</title>
+ <link href="../Styles/stylesheet.css" type="text/css" rel="stylesheet"/>
+ <script type="text/javascript" src="../Misc/script.js"></script>
+ <style>
+ body{-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none;background-color:#ddd !important;}
+ .ctt{font-family:illus1,emoji,sym;text-align:center;font-size:2em;margin:1em 0 0;font-weight:bold;color:#fff;text-shadow:0 0 3px #777;}
+ .toc{margin:0.5em 0;text-align:center;border-left:0;border-bottom:1px solid #fff;padding-bottom:0.5em;}
+ .toc a{display:block;font-family:ctt1,emoji,sym;padding:0.25em 0 0.1em;color:#000;}
+ .toc a p{line-height:1.1em;}
+ .toc .ctit{font-family:ctt1,emoji,sym;font-size:0.8em;padding:0.1em 0 0;color:#4f4d4e;}
+ .c1{color:#4f4d4e;}
+ .dbox,.ebox{background-color:#5b5758;color:#fff;padding:0.06em 0.2em 0;}
+ .ebox{background-color:#000;}
+ </style>
+</head>
+<body bgcolor="#ddd"><div style="margin:0 auto 1em;width:fit-content;-webkit-transform:rotate(-2deg);transform:rotate(-2deg);transform-origin:center;"></div></body>
+</html>`,
+    });
+
+    await buildLightNovelEpubFromBook({
+      title: '义妹生活 another days [台简]',
+      volume: 'another-days',
+      author: '三河ごーすと',
+      illustrator: 'Hiten',
+      coverImage: { type: 'image', fileName: 'cover.jpg', src: 'image/cover.jpg', id: 'cover', alt: 'cover' },
+      frontImages: [],
+      backImages: [],
+      preBlocks: [],
+      summaryBlocks: [],
+      creditBlocks: [],
+      chapters: [
+        { title: '前言', blocks: [{ type: 'text', text: '前言正文。' }] },
+        { title: '动画义妹生活第１集随笔（三河ごーすと感想）', blocks: [{ type: 'image', fileName: 'kuchie-006.jpg' }, { type: 'text', text: '第一集正文。' }] },
+        { title: '动画义妹生活第２集随笔（三河ごーすと感想）', blocks: [{ type: 'image', fileName: 'kuchie-007.jpg' }, { type: 'text', text: '第二集正文。' }] },
+        { title: '动画义妹生活第３集随笔（三河ごーすと感想）', blocks: [{ type: 'image', fileName: 'kuchie-008.jpg' }, { type: 'text', text: '第三集正文。' }] },
+      ],
+    }, {
+      refEpubPath: refPath,
+      styleRefEpubPath: styleRefPath,
+      outEpubPath: outPath,
+      includeSpecials: false,
+      sourceImages: {
+        cover: { type: 'image', fileName: 'cover.jpg', src: 'image/cover.jpg', id: 'cover', alt: 'cover', mediaType: 'image/jpeg', buffer: Buffer.from([1]) },
+        front: [],
+        body: [
+          { type: 'image', fileName: 'kuchie-006.jpg', src: 'image/kuchie-006.jpg', id: 'kuchie-006', alt: 'kuchie-006', mediaType: 'image/jpeg', buffer: Buffer.from([2]) },
+          { type: 'image', fileName: 'kuchie-007.jpg', src: 'image/kuchie-007.jpg', id: 'kuchie-007', alt: 'kuchie-007', mediaType: 'image/jpeg', buffer: Buffer.from([3]) },
+          { type: 'image', fileName: 'kuchie-008.jpg', src: 'image/kuchie-008.jpg', id: 'kuchie-008', alt: 'kuchie-008', mediaType: 'image/jpeg', buffer: Buffer.from([4]) },
+        ],
+        back: [],
+      },
+      modifiedIso: '2026-07-01T00:00:00.000Z',
+    });
+
+    const epub = await readEpub(outPath);
+    const toc = epub.entries['OEBPS/Text/TOC.xhtml'].toString('utf8');
+    const nav = epub.entries['OEBPS/Text/navigation-documents.xhtml'].toString('utf8');
+    const ncx = epub.entries['OEBPS/toc.ncx'].toString('utf8');
+
+    assert.match(toc, /background-color:#ddd/);
+    assert.match(toc, /<span class="dbox">动画<\/span>/);
+    assert.match(toc, /义<span class="c1">妹<\/span>生活第３话的感想/);
+    assert.match(toc, /<p class="ctit">（三河ごーすと感想）<\/p>/);
+    assert.match(toc, /href="illus0003\.xhtml"[\s\S]*第３话的感想/);
+    assert.doesNotMatch(toc, /href="chapter0004\.xhtml"[\s\S]*第３话的感想/);
+    assert.match(nav, /href="illus0003\.xhtml">动画义妹生活第３集随笔（三河ごーすと感想）<\/a>/);
+    assert.doesNotMatch(nav, /href="chapter0004\.xhtml">动画义妹生活第３集随笔（三河ごーすと感想）<\/a>/);
+    assert.match(ncx, /<text>动画义妹生活第３集随笔（三河ごーすと感想）<\/text>\s*<\/navLabel>\s*<content src="Text\/illus0003\.xhtml"\/>/);
+    assert.doesNotMatch(ncx, /<text>动画义妹生活第３集随笔（三河ごーすと感想）<\/text>\s*<\/navLabel>\s*<content src="Text\/chapter0004\.xhtml"\/>/);
+  } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });
@@ -621,6 +775,74 @@ test('buildLightNovelEpub recognizes special.xhtml (no numeric suffix) as specia
     assert.match(tocHtml, /电子书特典/);
   } finally {
     globalThis.fetch = originalFetch;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('buildLightNovelEpubFromBook names an image-only special group as 特典合集', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-html-special-group-fallback-'));
+  try {
+    const refPath = join(dir, 'ref.epub');
+    const styleRefPath = join(dir, 'style-ref-special-fallback.epub');
+    const outPath = join(dir, 'out.epub');
+    await writeEpub(refPath, {
+      'META-INF/container.xml': '<container/>',
+      'OEBPS/Styles/stylesheet.css': '',
+      'OEBPS/Misc/script.js': '',
+    });
+    await writeEpub(styleRefPath, {
+      'OEBPS/content.opf': `<?xml version="1.0" encoding="utf-8"?>
+<package version="3.0" xmlns="http://www.idpf.org/2007/opf">
+  <manifest>
+    <item id="special" href="Text/special.xhtml" media-type="application/xhtml+xml"/>
+    <item id="special0001" href="Text/special0001.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="special"/>
+    <itemref idref="special0001"/>
+  </spine>
+</package>`,
+      'OEBPS/Text/special.xhtml': '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>插图</title></head><body><img src="../Images/t1.png"/></body></html>',
+      'OEBPS/Text/special0001.xhtml': '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>电子书特典</title></head><body><h4>电子书特典</h4></body></html>',
+      'OEBPS/Images/t1.png': Buffer.from([1]),
+    });
+
+    await buildLightNovelEpubFromBook({
+      title: '义妹生活 another days [台简]',
+      volume: 'another-days',
+      author: '三河ごーすと',
+      illustrator: 'Hiten',
+      coverImage: { type: 'image', fileName: 'cover.jpg', src: 'image/cover.jpg', id: 'cover', alt: 'cover' },
+      frontImages: [],
+      backImages: [],
+      preBlocks: [],
+      summaryBlocks: [],
+      creditBlocks: [],
+      chapters: [{ title: '前言', blocks: [{ type: 'text', text: '正文。' }] }],
+    }, {
+      refEpubPath: refPath,
+      styleRefEpubPath: styleRefPath,
+      outEpubPath: outPath,
+      includeSpecials: true,
+      sourceImages: {
+        cover: { type: 'image', fileName: 'cover.jpg', src: 'image/cover.jpg', id: 'cover', alt: 'cover', mediaType: 'image/jpeg', buffer: Buffer.from([1]) },
+        front: [],
+        body: [],
+        back: [],
+      },
+      modifiedIso: '2026-07-01T00:00:00.000Z',
+    });
+
+    const epub = await readEpub(outPath);
+    const toc = epub.entries['OEBPS/Text/TOC.xhtml'].toString('utf8');
+    const nav = epub.entries['OEBPS/Text/navigation-documents.xhtml'].toString('utf8');
+    const ncx = epub.entries['OEBPS/toc.ncx'].toString('utf8');
+
+    assert.match(toc, /特典合集/);
+    assert.doesNotMatch(toc, />插图</);
+    assert.match(nav, /special\.xhtml">特典合集<\/a>\s*<ol>/);
+    assert.match(ncx, /<text>特典合集<\/text>/);
+  } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });

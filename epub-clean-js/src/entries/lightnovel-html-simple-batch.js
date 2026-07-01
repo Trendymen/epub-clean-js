@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { buildLightNovelEpub, buildLightNovelEpubFromBook } from '../../books/yimei-seikatsu/lightnovel-html/index.js';
 import { parseHyreadEpubToBook } from '../../books/yimei-seikatsu/hyread-parser.js';
 
-const defaultRoot = path.resolve(import.meta.dirname, '../../..');
+export const defaultRoot = path.resolve(import.meta.dirname, '../../..');
 
 function normalizeFileName(name) {
   return name.normalize('NFC');
@@ -48,7 +48,7 @@ export function rubyAnnotationsForVolume(volume) {
   return [];
 }
 
-function resolveSourceImageEpubPath(root, volume) {
+export function resolveSourceImageEpubPath(root, volume) {
   if (volume === '08' || volume === '11' || volume === '13') {
     const hyreadDir = path.join(root, 'output/hyread');
     if (fs.existsSync(hyreadDir)) {
@@ -108,7 +108,7 @@ function backupOutputs(outDir, volumes) {
   return count > 0 ? backupDir : null;
 }
 
-export async function runBatch({ root = defaultRoot, outDir = null, volumes = ['11', '12'], creditName = '嘻嘻嘻', backup = true } = {}) {
+export async function runBatch({ root = defaultRoot, outDir = null, volumes = ['11', '12', '13'], creditName = '嘻嘻嘻', backup = true } = {}) {
   const resolvedRoot = path.resolve(root);
   const resolvedOutDir = path.resolve(outDir || path.join(resolvedRoot, 'output/simple'));
   const creditOverrides = {
@@ -169,7 +169,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     options: {
       root: { type: 'string' },
       'out-dir': { type: 'string' },
-      volumes: { type: 'string', default: '11,12' },
+      volumes: { type: 'string', default: '11,12,13' },
       'credit-name': { type: 'string', default: '嘻嘻嘻' },
       'skip-backup': { type: 'boolean', default: false },
     },
