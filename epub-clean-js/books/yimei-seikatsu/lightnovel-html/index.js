@@ -413,8 +413,9 @@ function setCssDeclaration(declarations, name, value, { after } = {}) {
 
 function tuneAnotherDaysTocStyle(style) {
   return style.replace(/\.toc \.ctit\{([^}]*)\}/, (match, declarations) => {
-    let tuned = setCssDeclaration(declarations, 'padding', '0.25em 0 0');
+    let tuned = setCssDeclaration(declarations, 'padding', '0.25em 0 0 3.6em');
     tuned = setCssDeclaration(tuned, 'line-height', '1.15em', { after: 'padding' });
+    tuned = setCssDeclaration(tuned, 'text-align', 'left', { after: 'line-height' });
     return `.toc .ctit{${tuned}}`;
   });
 }
