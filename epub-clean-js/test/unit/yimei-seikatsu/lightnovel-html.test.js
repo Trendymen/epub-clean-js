@@ -433,6 +433,7 @@ test('buildLightNovelEpubFromBook uses leading illustration pages as another-day
     assert.match(toc, /<span class="dbox">动画<\/span>/);
     assert.match(toc, /义<span class="c1">妹<\/span>生活第３集随笔/);
     assert.doesNotMatch(toc, /第３话的感想/);
+    assert.match(toc, /\.toc \.ctit\{font-family:"Source Han Serif SC SemiBold";font-size:0\.8em;padding:0\.25em 0 0;line-height:1\.15em;color:#4f4d4e\}/);
     assert.match(toc, /<p class="ctit">（三河ごーすと感想）<\/p>/);
     assert.match(toc, /<span class="ebox">外传小说<\/span>[\s\S]*《Goodbye》读卖栞/);
     assert.doesNotMatch(toc, /「Goodbye」读卖栞/);

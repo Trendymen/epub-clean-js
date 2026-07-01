@@ -395,11 +395,35 @@ function renderAnotherDaysTocTitle(title) {
   return `<p class="em095">${escapeXml(normalized)}</p>`;
 }
 
+function setCssDeclaration(declarations, name, value, { after } = {}) {
+  const props = declarations.split(';').map((prop) => prop.trim()).filter(Boolean);
+  const lowerName = name.toLowerCase();
+  const index = props.findIndex((prop) => prop.toLowerCase().startsWith(`${lowerName}:`));
+  const next = `${name}:${value}`;
+  if (index >= 0) {
+    props[index] = next;
+    return props.join(';');
+  }
+  const afterIndex = after
+    ? props.findIndex((prop) => prop.toLowerCase().startsWith(`${after.toLowerCase()}:`))
+    : -1;
+  props.splice(afterIndex >= 0 ? afterIndex + 1 : props.length, 0, next);
+  return props.join(';');
+}
+
+function tuneAnotherDaysTocStyle(style) {
+  return style.replace(/\.toc \.ctit\{([^}]*)\}/, (match, declarations) => {
+    let tuned = setCssDeclaration(declarations, 'padding', '0.25em 0 0');
+    tuned = setCssDeclaration(tuned, 'line-height', '1.15em', { after: 'padding' });
+    return `.toc .ctit{${tuned}}`;
+  });
+}
+
 function renderAnotherDaysTocXhtml(tocEntries, styleRef) {
   const source = styleRef?.entries['OEBPS/Text/TOC.xhtml']?.toString('utf8');
   if (!source) return null;
 
-  const style = source.match(/<style\b[^>]*>([\s\S]*?)<\/style>/i)?.[1]?.trim();
+  const style = tuneAnotherDaysTocStyle(source.match(/<style\b[^>]*>([\s\S]*?)<\/style>/i)?.[1]?.trim() || '');
   if (!style) return null;
   const bodyAttrs = source.match(/<body\b([^>]*)>/i)?.[1] || ' bgcolor="#ddd"';
   const containerAttrs = source.match(/<body\b[^>]*>\s*<div\b([^>]*)>/i)?.[1]
