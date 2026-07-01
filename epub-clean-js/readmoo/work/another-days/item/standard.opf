@@ -1,0 +1,184 @@
+<?xml version='1.0' encoding='utf-8'?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" xml:lang="zh-tw" unique-identifier="bw-ecode" prefix="rendition: http://www.idpf.org/vocab/rendition/#          ebpaj: http://www.ebpaj.jp/          fixed-layout-jp: http://www.digital-comic.jp/          kadokawa: http://www.kadokawa.co.jp/          access: http://www.access-company.com/2012/layout#          ibooks: http://vocabulary.itunes.apple.com/rdf/ibooks/vocabulary-extensions-1.0/">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <!-- 作品名 -->
+    <dc:title id="title">義妹生活 another days</dc:title>
+    <meta refines="#title" property="file-as">義妹生活 another days</meta>
+    <!-- 著者名 -->
+    <dc:creator id="creator01">三河ごーすと</dc:creator>
+    <meta refines="#creator01" property="role" scheme="marc:relators">aut</meta>
+    <meta refines="#creator01" property="file-as">三河ごーすと</meta>
+    <meta refines="#creator01" property="display-seq">1</meta>
+    <!-- 出版社名 -->
+    <dc:publisher id="publisher">台灣角川股份有限公司</dc:publisher>
+    <meta refines="#publisher" property="file-as">カドカワカドカワショテン</meta>
+    <!-- 言語 -->
+    <dc:language>zh-TW</dc:language>
+    <!-- ファイルid -->
+    <dc:identifier id="bw-ecode">urn:isbn:9786264457989</dc:identifier>
+    <!-- 更新日 -->
+    <meta property="dcterms:modified">2026-05-19T00:00:00Z</meta>
+    <!-- Fixed-Layout Documents指定 -->
+    <meta property="rendition:layout">reflowable</meta>
+    <meta property="rendition:spread">auto</meta>
+    <meta property="rendition:orientation">auto</meta>
+    <!-- etc. -->
+    <meta property="ebpaj:guide-version">1.1.2</meta>
+    <meta property="kadokawa:version">1.0.1</meta>
+    <meta property="kadokawa:shoten-reflow">2.1.1</meta>
+    <meta property="ibooks:specified-fonts">true</meta>
+    <meta property="ibooks:binding">true</meta>
+    <meta name="cover" content="cover"/>
+    <meta content="Bisheng 3.260.8" name="moo addon(rfl)"/>
+  </metadata>
+  <manifest>
+    <!-- navigation -->
+    <item media-type="application/xhtml+xml" id="toc" href="navigation-documents.xhtml" properties="nav"/>
+    <!-- style -->
+    <item media-type="text/css" id="fixed-layout-jp" href="style/fixed-layout-jp.css"/>
+    <item media-type="text/css" id="book-style" href="style/book-style.css"/>
+    <item media-type="text/css" id="style-reset" href="style/style-reset.css"/>
+    <item media-type="text/css" id="style-standard" href="style/style-standard.css"/>
+    <item media-type="text/css" id="style-advance" href="style/style-advance.css"/>
+    <item media-type="text/css" id="style-check" href="style/style-check.css"/>
+    <item media-type="text/css" id="style-bc-kadokawa" href="style/style-bc-kadokawa.css"/>
+    <!-- image -->
+    <item media-type="image/jpeg" id="cover" href="image/cover.jpg" properties="cover-image"/>
+    <item media-type="image/jpeg" id="kuchie-001" href="image/kuchie-001.jpg"/>
+    <item media-type="image/jpeg" id="kuchie-002" href="image/kuchie-002.jpg"/>
+    <item media-type="image/jpeg" id="kuchie-003" href="image/kuchie-003.jpg"/>
+    <item media-type="image/jpeg" id="kuchie-004" href="image/kuchie-004.jpg"/>
+    <item media-type="image/jpeg" id="kuchie-005" href="image/kuchie-005.jpg"/>
+    <item media-type="image/jpeg" id="kuchie-006" href="image/kuchie-006.jpg"/>
+    <item media-type="image/jpeg" id="kuchie-007" href="image/kuchie-007.jpg"/>
+    <item media-type="image/jpeg" id="kuchie-008" href="image/kuchie-008.jpg"/>
+    <item media-type="image/jpeg" id="kuchie-009" href="image/kuchie-009.jpg"/>
+    <item media-type="image/jpeg" id="kuchie-010" href="image/kuchie-010.jpg"/>
+    <item media-type="image/jpeg" id="kuchie-011" href="image/kuchie-011.jpg"/>
+    <item media-type="image/jpeg" id="kuchie-012" href="image/kuchie-012.jpg"/>
+    <item media-type="image/jpeg" id="kuchie-013" href="image/kuchie-013.jpg"/>
+    <item media-type="image/jpeg" id="kuchie-014" href="image/kuchie-014.jpg"/>
+    <item media-type="image/jpeg" id="kuchie-015" href="image/kuchie-015.jpg"/>
+    <item media-type="image/jpeg" id="kuchie-016" href="image/kuchie-016.jpg"/>
+    <item media-type="image/jpeg" id="kuchie-017" href="image/kuchie-017.jpg"/>
+    <item media-type="image/jpeg" id="kuchie-018" href="image/kuchie-018.jpg"/>
+    <item media-type="image/jpeg" id="kuchie-019" href="image/kuchie-019.jpg"/>
+    <item media-type="image/jpeg" id="kuchie-020" href="image/kuchie-020.jpg"/>
+    <item media-type="image/jpeg" id="kuchie-021" href="image/kuchie-021.jpg"/>
+    <item media-type="image/jpeg" id="logo-colophon" href="image/logo-colophon.jpg"/>
+    <item media-type="image/jpeg" id="logo-title" href="image/logo-title.jpg"/>
+    <item media-type="image/jpeg" id="p017" href="image/p017.jpg"/>
+    <item media-type="image/jpeg" id="p019" href="image/p019.jpg"/>
+    <item media-type="image/jpeg" id="p030" href="image/p030.jpg"/>
+    <item media-type="image/jpeg" id="p039" href="image/p039.jpg"/>
+    <item media-type="image/jpeg" id="p049" href="image/p049.jpg"/>
+    <item media-type="image/jpeg" id="p050" href="image/p050.jpg"/>
+    <item media-type="image/jpeg" id="p053" href="image/p053.jpg"/>
+    <item media-type="image/jpeg" id="p054" href="image/p054.jpg"/>
+    <item media-type="image/jpeg" id="p061" href="image/p061.jpg"/>
+    <item media-type="image/jpeg" id="p079" href="image/p079.jpg"/>
+    <item media-type="image/jpeg" id="p090" href="image/p090.jpg"/>
+    <item media-type="image/jpeg" id="p092" href="image/p092.jpg"/>
+    <item media-type="image/jpeg" id="p094" href="image/p094.jpg"/>
+    <item media-type="image/jpeg" id="p096" href="image/p096.jpg"/>
+    <item media-type="image/jpeg" id="p112" href="image/p112.jpg"/>
+    <item media-type="image/jpeg" id="p114" href="image/p114.jpg"/>
+    <item media-type="image/jpeg" id="p118" href="image/p118.jpg"/>
+    <item media-type="image/jpeg" id="p128" href="image/p128.jpg"/>
+    <item media-type="image/jpeg" id="p130" href="image/p130.jpg"/>
+    <item media-type="image/jpeg" id="p135" href="image/p135.jpg"/>
+    <item media-type="image/jpeg" id="p141" href="image/p141.jpg"/>
+    <item media-type="image/jpeg" id="p144" href="image/p144.jpg"/>
+    <item media-type="image/jpeg" id="p152" href="image/p152.jpg"/>
+    <item media-type="image/jpeg" id="p154" href="image/p154.jpg"/>
+    <item media-type="image/jpeg" id="p168" href="image/p168.jpg"/>
+    <item media-type="image/jpeg" id="p189" href="image/p189.jpg"/>
+    <item media-type="image/jpeg" id="p243" href="image/p243.jpg"/>
+    <item media-type="image/jpeg" id="p285" href="image/p285.jpg"/>
+    <!-- xhtml -->
+    <item media-type="application/xhtml+xml" id="p-cover" href="xhtml/p-cover.xhtml" properties="svg"/>
+    <item media-type="application/xhtml+xml" id="p-fmatter-001" href="xhtml/p-fmatter-001.xhtml" properties="svg"/>
+    <item media-type="application/xhtml+xml" id="p-fmatter-002" href="xhtml/p-fmatter-002.xhtml" properties="svg"/>
+    <item media-type="application/xhtml+xml" id="p-fmatter-003" href="xhtml/p-fmatter-003.xhtml" properties="svg"/>
+    <item media-type="application/xhtml+xml" id="p-fmatter-004" href="xhtml/p-fmatter-004.xhtml" properties="svg"/>
+    <item media-type="application/xhtml+xml" id="p-fmatter-005" href="xhtml/p-fmatter-005.xhtml" properties="svg"/>
+    <item media-type="application/xhtml+xml" id="p-fmatter-006" href="xhtml/p-fmatter-006.xhtml" properties="svg"/>
+    <item media-type="application/xhtml+xml" id="p-fmatter-007" href="xhtml/p-fmatter-007.xhtml" properties="svg"/>
+    <item media-type="application/xhtml+xml" id="p-fmatter-008" href="xhtml/p-fmatter-008.xhtml" properties="svg"/>
+    <item media-type="application/xhtml+xml" id="p-fmatter-009" href="xhtml/p-fmatter-009.xhtml" properties="svg"/>
+    <item media-type="application/xhtml+xml" id="p-fmatter-010" href="xhtml/p-fmatter-010.xhtml" properties="svg"/>
+    <item media-type="application/xhtml+xml" id="p-fmatter-011" href="xhtml/p-fmatter-011.xhtml" properties="svg"/>
+    <item media-type="application/xhtml+xml" id="p-fmatter-012" href="xhtml/p-fmatter-012.xhtml" properties="svg"/>
+    <item media-type="application/xhtml+xml" id="p-fmatter-013" href="xhtml/p-fmatter-013.xhtml" properties="svg"/>
+    <item media-type="application/xhtml+xml" id="p-fmatter-014" href="xhtml/p-fmatter-014.xhtml" properties="svg"/>
+    <item media-type="application/xhtml+xml" id="p-fmatter-015" href="xhtml/p-fmatter-015.xhtml" properties="svg"/>
+    <item media-type="application/xhtml+xml" id="p-fmatter-016" href="xhtml/p-fmatter-016.xhtml" properties="svg"/>
+    <item media-type="application/xhtml+xml" id="p-fmatter-017" href="xhtml/p-fmatter-017.xhtml" properties="svg"/>
+    <item media-type="application/xhtml+xml" id="p-fmatter-018" href="xhtml/p-fmatter-018.xhtml" properties="svg"/>
+    <item media-type="application/xhtml+xml" id="p-fmatter-019" href="xhtml/p-fmatter-019.xhtml" properties="svg"/>
+    <item media-type="application/xhtml+xml" id="p-fmatter-020" href="xhtml/p-fmatter-020.xhtml" properties="svg"/>
+    <item media-type="application/xhtml+xml" id="p-fmatter-021" href="xhtml/p-fmatter-021.xhtml" properties="svg"/>
+    <item media-type="application/xhtml+xml" id="p-titlepage" href="xhtml/p-titlepage.xhtml"/>
+    <item media-type="application/xhtml+xml" id="p-toc-001" href="xhtml/p-toc-001.xhtml"/>
+    <item media-type="application/xhtml+xml" id="p-001" href="xhtml/p-001.xhtml"/>
+    <item media-type="application/xhtml+xml" id="p-002" href="xhtml/p-002.xhtml"/>
+    <item media-type="application/xhtml+xml" id="p-003" href="xhtml/p-003.xhtml"/>
+    <item media-type="application/xhtml+xml" id="p-004" href="xhtml/p-004.xhtml"/>
+    <item media-type="application/xhtml+xml" id="p-005" href="xhtml/p-005.xhtml"/>
+    <item media-type="application/xhtml+xml" id="p-006" href="xhtml/p-006.xhtml"/>
+    <item media-type="application/xhtml+xml" id="p-007" href="xhtml/p-007.xhtml"/>
+    <item media-type="application/xhtml+xml" id="p-008" href="xhtml/p-008.xhtml"/>
+    <item media-type="application/xhtml+xml" id="p-009" href="xhtml/p-009.xhtml"/>
+    <item media-type="application/xhtml+xml" id="p-010" href="xhtml/p-010.xhtml"/>
+    <item media-type="application/xhtml+xml" id="p-011" href="xhtml/p-011.xhtml"/>
+    <item media-type="application/xhtml+xml" id="p-012" href="xhtml/p-012.xhtml"/>
+    <item media-type="application/xhtml+xml" id="p-013" href="xhtml/p-013.xhtml"/>
+    <item media-type="application/xhtml+xml" id="p-014" href="xhtml/p-014.xhtml"/>
+    <item media-type="application/xhtml+xml" id="p-015" href="xhtml/p-015.xhtml"/>
+    <item media-type="application/xhtml+xml" id="p-016" href="xhtml/p-016.xhtml"/>
+    <item media-type="application/xhtml+xml" id="p-colophon" href="xhtml/p-colophon.xhtml"/>
+  </manifest>
+  <spine page-progression-direction="rtl">
+    <itemref linear="yes" idref="p-cover" properties="rendition:layout-pre-paginated rendition:spread-none rendition:page-spread-center"/>
+    <itemref linear="yes" idref="p-fmatter-001" properties="rendition:layout-pre-paginated rendition:spread-none rendition:page-spread-center"/>
+    <itemref linear="yes" idref="p-fmatter-002" properties="rendition:layout-pre-paginated rendition:spread-none access:scroll-both access:orientation-portrait"/>
+    <itemref linear="yes" idref="p-fmatter-003" properties="rendition:layout-pre-paginated rendition:spread-none access:scroll-both access:orientation-portrait"/>
+    <itemref linear="yes" idref="p-fmatter-004" properties="rendition:layout-pre-paginated rendition:spread-none access:scroll-both access:orientation-portrait"/>
+    <itemref linear="yes" idref="p-fmatter-005" properties="rendition:layout-pre-paginated rendition:spread-none rendition:page-spread-center"/>
+    <itemref linear="yes" idref="p-titlepage" properties="rendition:page-spread-center"/>
+    <itemref linear="yes" idref="p-toc-001" properties="page-spread-right"/>
+    <itemref linear="yes" idref="p-001" properties="page-spread-right"/>
+    <itemref linear="yes" idref="p-fmatter-006" properties="rendition:layout-pre-paginated rendition:spread-none rendition:page-spread-center"/>
+    <itemref linear="yes" idref="p-002" properties="page-spread-right"/>
+    <itemref linear="yes" idref="p-fmatter-007" properties="rendition:layout-pre-paginated rendition:spread-none rendition:page-spread-center"/>
+    <itemref linear="yes" idref="p-003" properties="page-spread-right"/>
+    <itemref linear="yes" idref="p-fmatter-008" properties="rendition:layout-pre-paginated rendition:spread-none rendition:page-spread-center"/>
+    <itemref linear="yes" idref="p-004" properties="page-spread-right"/>
+    <itemref linear="yes" idref="p-fmatter-009" properties="rendition:layout-pre-paginated rendition:spread-none rendition:page-spread-center"/>
+    <itemref linear="yes" idref="p-005" properties="page-spread-right"/>
+    <itemref linear="yes" idref="p-fmatter-010" properties="rendition:layout-pre-paginated rendition:spread-none rendition:page-spread-center"/>
+    <itemref linear="yes" idref="p-006" properties="page-spread-right"/>
+    <itemref linear="yes" idref="p-fmatter-011" properties="rendition:layout-pre-paginated rendition:spread-none access:scroll-both access:orientation-portrait"/>
+    <itemref linear="yes" idref="p-007" properties="page-spread-right"/>
+    <itemref linear="yes" idref="p-fmatter-012" properties="rendition:layout-pre-paginated rendition:spread-none rendition:page-spread-center"/>
+    <itemref linear="yes" idref="p-008" properties="page-spread-right"/>
+    <itemref linear="yes" idref="p-fmatter-013" properties="rendition:layout-pre-paginated rendition:spread-none rendition:page-spread-center"/>
+    <itemref linear="yes" idref="p-009" properties="page-spread-right"/>
+    <itemref linear="yes" idref="p-fmatter-014" properties="rendition:layout-pre-paginated rendition:spread-none rendition:page-spread-center"/>
+    <itemref linear="yes" idref="p-010" properties="page-spread-right"/>
+    <itemref linear="yes" idref="p-fmatter-015" properties="rendition:layout-pre-paginated rendition:spread-none rendition:page-spread-center"/>
+    <itemref linear="yes" idref="p-011" properties="page-spread-right"/>
+    <itemref linear="yes" idref="p-fmatter-016" properties="rendition:layout-pre-paginated rendition:spread-none rendition:page-spread-center"/>
+    <itemref linear="yes" idref="p-012" properties="page-spread-right"/>
+    <itemref linear="yes" idref="p-fmatter-017" properties="rendition:layout-pre-paginated rendition:spread-none rendition:page-spread-center"/>
+    <itemref linear="yes" idref="p-013" properties="page-spread-right"/>
+    <itemref linear="yes" idref="p-fmatter-018" properties="rendition:layout-pre-paginated rendition:spread-none rendition:page-spread-center"/>
+    <itemref linear="yes" idref="p-014" properties="page-spread-right"/>
+    <itemref linear="yes" idref="p-fmatter-019" properties="rendition:layout-pre-paginated rendition:spread-none rendition:page-spread-center"/>
+    <itemref linear="yes" idref="p-015" properties="page-spread-right"/>
+    <itemref linear="yes" idref="p-016" properties="page-spread-right"/>
+    <itemref linear="yes" idref="p-fmatter-020" properties="rendition:layout-pre-paginated rendition:spread-none access:scroll-both access:orientation-portrait"/>
+    <itemref linear="yes" idref="p-fmatter-021" properties="rendition:layout-pre-paginated rendition:spread-none access:scroll-both access:orientation-portrait"/>
+    <itemref linear="yes" idref="p-colophon" properties="page-spread-right"/>
+  </spine>
+</package>
