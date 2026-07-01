@@ -279,6 +279,80 @@ test('buildLightNovelEpubFromBook keeps unlisted chapters in spine but out of ev
   }
 });
 
+test('buildLightNovelEpubFromBook applies another-days fixed 日翻 notes while keeping 台版 inline notes clickable', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-html-another-days-notes-'));
+  try {
+    const refPath = join(dir, 'ref.epub');
+    const outPath = join(dir, 'out.epub');
+    await writeEpub(refPath, {
+      'META-INF/container.xml': '<container/>',
+      'OEBPS/Styles/stylesheet.css': '',
+      'OEBPS/Misc/script.js': '',
+    });
+
+    const externalNovelBlocks = Array.from({ length: 26 }, (_, index) => ({
+      type: 'text',
+      text: `占位段落${index}。`,
+    }));
+    externalNovelBlocks[25] = {
+      type: 'text',
+      text: '真要说起来，我的名字就是读卖栞。把书签夹在书里，读完后卖掉。先不论「读完的书到底要不要卖」，我这种人若在推理作品中登场，不是侦探就是尸体吧（註：日文中，「栞」的常用字义之一为书签）。',
+    };
+
+    await buildLightNovelEpubFromBook({
+      title: '义妹生活 another days [台简]',
+      volume: 'another-days',
+      author: '三河ごーすと',
+      illustrator: 'Hiten',
+      coverImage: { type: 'image', fileName: 'cover.jpg', src: 'image/cover.jpg', id: 'cover', alt: 'cover' },
+      frontImages: [],
+      backImages: [],
+      preBlocks: [],
+      summaryBlocks: [],
+      creditBlocks: [],
+      chapters: [
+        { title: '前言', blocks: [{ type: 'text', text: '前言正文。' }] },
+        {
+          title: '动画义妹生活第１集随笔（三河ごーすと感想）',
+          blocks: [
+            { type: 'text', text: '第一段。' },
+            { type: 'text', text: '最后我和责编决定用「恋爱生活小说」这个称呼。' },
+          ],
+        },
+        ...Array.from({ length: 12 }, (_, index) => ({
+          title: `占位章${index + 3}`,
+          blocks: [{ type: 'text', text: `占位正文${index + 3}。` }],
+        })),
+        { title: '外传小说《Goodbye》读卖栞', blocks: externalNovelBlocks },
+      ],
+    }, {
+      refEpubPath: refPath,
+      outEpubPath: outPath,
+      includeSpecials: false,
+      sourceImages: {
+        cover: { type: 'image', fileName: 'cover.jpg', src: 'image/cover.jpg', id: 'cover', alt: 'cover', mediaType: 'image/jpeg', buffer: Buffer.from([1]) },
+        front: [],
+        body: [],
+        back: [],
+      },
+      modifiedIso: '2026-07-01T00:00:00.000Z',
+    });
+
+    const epub = await readEpub(outPath);
+    const episode1 = epub.entries['OEBPS/Text/chapter0002.xhtml'].toString('utf8');
+    const goodbye = epub.entries['OEBPS/Text/chapter0015.xhtml'].toString('utf8');
+
+    assert.match(episode1, /重视人物日常、心理活动与人际关系的剧情作品/);
+    assert.match(episode1, /恋爱生活小说<\/ruby>|恋爱生活小说/);
+    assert.match(episode1, /class="duokan-footnote"/);
+    assert.match(goodbye, /日文中，「栞」的常用字义之一为书签/);
+    assert.match(goodbye, /class="duokan-footnote"/);
+    assert.doesNotMatch(goodbye, /（註：/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('buildLightNovelEpubFromBook uses leading illustration pages as another-days TOC targets', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'ln-html-another-days-toc-'));
   try {

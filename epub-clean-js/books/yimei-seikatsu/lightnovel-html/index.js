@@ -8,6 +8,7 @@ import { readEpub, writeEpub } from '../../../src/core/zip-io.js';
 import { applyToFiles } from '../../../src/core/font-subset.js';
 import { buildSteraFootnote, selfCloseVoidTags } from '../../../src/core/stages/footnote-fix.js';
 import { MESSAGE_DISCLAIMER_LINES } from '../migrate/extras-cleaner.js';
+import { anotherDaysFixedFootnotesForChapter } from '../another-days-footnotes.js';
 
 const toSimplified = OpenCC.Converter({ from: 'tw', to: 'cn' });
 
@@ -150,23 +151,73 @@ function renderImageDiv(image, className = 'kuchie') {
  </div>`;
 }
 
-// 把单个段落文本里的内联注释替换成 duokan-footnote 引用锚点，
+function buildRenderedFootnote(body, state) {
+  const [refHtml, asideHtml] = buildSteraFootnote({ body }, state.counter, { iconRegular: 'note.png' });
+  state.asides.push(asideHtml);
+  state.counter += 1;
+  return refHtml;
+}
+
+function resolveFixedFootnoteOffset(text, note) {
+  if (typeof note.charOffset === 'number') {
+    return Math.max(0, Math.min(note.charOffset, text.length));
+  }
+  if (typeof note.anchor !== 'string' || note.anchor.length === 0) return text.length;
+
+  let from = 0;
+  const occurrence = Math.max(1, note.occurrence || 1);
+  for (let i = 0; i < occurrence; i += 1) {
+    const pos = text.indexOf(note.anchor, from);
+    if (pos < 0) return text.length;
+    if (i === occurrence - 1) return pos + note.anchor.length;
+    from = pos + note.anchor.length;
+  }
+  return text.length;
+}
+
+function collectNoteEvents(text, fixedFootnotes = []) {
+  const events = [];
+  let order = 0;
+  let match;
+  INLINE_NOTE_RE.lastIndex = 0;
+  while ((match = INLINE_NOTE_RE.exec(text)) !== null) {
+    events.push({
+      type: 'inline',
+      start: match.index,
+      end: match.index + match[0].length,
+      body: normalizeText(match[1]),
+      order: order += 1,
+    });
+  }
+
+  for (const note of fixedFootnotes) {
+    const start = resolveFixedFootnoteOffset(text, note);
+    events.push({
+      type: 'fixed',
+      start,
+      end: start,
+      body: normalizeText(note.body),
+      order: order += 1,
+    });
+  }
+
+  return events
+    .filter((event) => event.body)
+    .sort((a, b) => (a.start - b.start) || (a.end - b.end) || (a.order - b.order));
+}
+
+// 把单个段落文本里的台版内联注释与固定迁移注释替换成 duokan-footnote 引用锚点，
 // 注释正文累积到 state.asides，编号由 state.counter 递增（每章重置）。
-function renderParagraphWithNotes(text, state) {
+function renderParagraphWithNotes(text, state, fixedFootnotes = []) {
   if (!state) return escapeXml(text);
   const renderText = (segment) => renderRubyAnnotations(segment, state.rubyAnnotations || []);
   let html = '';
   let lastIndex = 0;
-  let match;
-  INLINE_NOTE_RE.lastIndex = 0;
-  while ((match = INLINE_NOTE_RE.exec(text)) !== null) {
-    html += renderText(text.slice(lastIndex, match.index));
-    const body = normalizeText(match[1]);
-    const [refHtml, asideHtml] = buildSteraFootnote({ body }, state.counter, { iconRegular: 'note.png' });
-    html += refHtml;
-    state.asides.push(asideHtml);
-    state.counter += 1;
-    lastIndex = match.index + match[0].length;
+  for (const event of collectNoteEvents(text, fixedFootnotes)) {
+    if (event.start < lastIndex) continue;
+    html += renderText(text.slice(lastIndex, event.start));
+    html += buildRenderedFootnote(event.body, state);
+    lastIndex = event.end;
   }
   html += renderText(text.slice(lastIndex));
   return html;
@@ -200,6 +251,7 @@ function renderRubyAnnotations(text, annotations = []) {
 
 function renderBlocks(blocks, state = null) {
   const lines = [];
+  let paraIdx = 0;
   for (const block of blocks) {
     if (block.type === 'image') {
       lines.push(renderImageDiv(block));
@@ -207,18 +259,35 @@ function renderBlocks(blocks, state = null) {
     }
     const text = normalizeText(block.text);
     if (!text || isSeparator(text)) continue;
-    lines.push(` <p>${renderParagraphWithNotes(text, state)}</p>`);
+    const fixedFootnotes = state?.fixedFootnotesByPara?.get(paraIdx) ?? [];
+    lines.push(` <p>${renderParagraphWithNotes(text, state, fixedFootnotes)}</p>`);
+    paraIdx += 1;
   }
   return lines.join('\n');
 }
 
-function renderChapterXhtml(chapter, { rubyAnnotations = [] } = {}) {
+function groupFixedFootnotesByPara(fixedFootnotes = []) {
+  const grouped = new Map();
+  for (const note of fixedFootnotes) {
+    if (typeof note?.afterParaIdx !== 'number') continue;
+    if (!grouped.has(note.afterParaIdx)) grouped.set(note.afterParaIdx, []);
+    grouped.get(note.afterParaIdx).push(note);
+  }
+  return grouped;
+}
+
+function renderChapterXhtml(chapter, { rubyAnnotations = [], fixedFootnotes = [] } = {}) {
   const [mainTitle, subtitle] = splitHeading(chapter.title);
   // 合并为单行 h3（匹配 healed 日翻版风格），有副标题时用全角空格连接
   const merged = subtitle ? `${mainTitle}　${subtitle}` : mainTitle;
   const heading = merged ? ` <h3>${escapeXml(merged)}</h3>` : '';
 
-  const state = { counter: 1, asides: [], rubyAnnotations };
+  const state = {
+    counter: 1,
+    asides: [],
+    rubyAnnotations,
+    fixedFootnotesByPara: groupFixedFootnotesByPara(fixedFootnotes),
+  };
   const body = renderBlocks(chapter.blocks, state);
   const footnotes = state.asides.length > 0 ? `\n${state.asides.join('')}` : '';
   return xhtml(chapter.title, [heading, body].filter(Boolean).join('\n') + footnotes);
@@ -1417,7 +1486,17 @@ export async function buildLightNovelEpubFromBook(book, {
     }
     // 仅当剩余有正文块或标题时输出章节页（纯彩插章不产生空 chapter）
     if (plan.hasChapterPage) {
-      addText(plan.id, plan.href, renderChapterXhtml({ title: plan.chapter.title, blocks: plan.bodyBlocks }, { rubyAnnotations }));
+      addText(
+        plan.id,
+        plan.href,
+        renderChapterXhtml(
+          { title: plan.chapter.title, blocks: plan.bodyBlocks },
+          {
+            rubyAnnotations,
+            fixedFootnotes: anotherDaysFixedFootnotesForChapter(volume, plan.id.replace(/\.xhtml$/, '')),
+          },
+        ),
+      );
     }
   }
 
