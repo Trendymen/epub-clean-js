@@ -404,6 +404,7 @@ test('buildLightNovelEpubFromBook uses leading illustration pages as another-day
         { title: '动画义妹生活第１集随笔（三河ごーすと感想）', blocks: [{ type: 'image', fileName: 'kuchie-006.jpg' }, { type: 'text', text: '第一集正文。' }] },
         { title: '动画义妹生活第２集随笔（三河ごーすと感想）', blocks: [{ type: 'image', fileName: 'kuchie-007.jpg' }, { type: 'text', text: '第二集正文。' }] },
         { title: '动画义妹生活第３集随笔（三河ごーすと感想）', blocks: [{ type: 'image', fileName: 'kuchie-008.jpg' }, { type: 'text', text: '第三集正文。' }] },
+        { title: '外传小说《Goodbye》读卖栞', blocks: [{ type: 'text', text: '外传正文。' }] },
       ],
     }, {
       refEpubPath: refPath,
@@ -430,10 +431,13 @@ test('buildLightNovelEpubFromBook uses leading illustration pages as another-day
 
     assert.match(toc, /background-color:#ddd/);
     assert.match(toc, /<span class="dbox">动画<\/span>/);
-    assert.match(toc, /义<span class="c1">妹<\/span>生活第３话的感想/);
+    assert.match(toc, /义<span class="c1">妹<\/span>生活第３集随笔/);
+    assert.doesNotMatch(toc, /第３话的感想/);
     assert.match(toc, /<p class="ctit">（三河ごーすと感想）<\/p>/);
-    assert.match(toc, /href="illus0003\.xhtml"[\s\S]*第３话的感想/);
-    assert.doesNotMatch(toc, /href="chapter0004\.xhtml"[\s\S]*第３话的感想/);
+    assert.match(toc, /<span class="ebox">外传小说<\/span>[\s\S]*《Goodbye》读卖栞/);
+    assert.doesNotMatch(toc, /「Goodbye」读卖栞/);
+    assert.match(toc, /href="illus0003\.xhtml"[\s\S]*第３集随笔/);
+    assert.doesNotMatch(toc, /href="chapter0004\.xhtml"[\s\S]*第３集随笔/);
     assert.match(nav, /href="illus0003\.xhtml">动画义妹生活第３集随笔（三河ごーすと感想）<\/a>/);
     assert.doesNotMatch(nav, /href="chapter0004\.xhtml">动画义妹生活第３集随笔（三河ごーすと感想）<\/a>/);
     assert.match(ncx, /<text>动画义妹生活第３集随笔（三河ごーすと感想）<\/text>\s*<\/navLabel>\s*<content src="Text\/illus0003\.xhtml"\/>/);

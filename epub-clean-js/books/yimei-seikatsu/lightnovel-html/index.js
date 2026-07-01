@@ -383,13 +383,13 @@ function renderAnotherDaysTocTitle(title) {
   const normalized = normalizeTitle(title);
   const anime = normalized.match(/^动画义妹生活第(.+?)集随笔（三河ごーすと感想）$/);
   if (anime) {
-    return `<p><span class="dbox">动画</span><span class="em05"> </span>义<span class="c1">妹</span>生活第${escapeXml(anime[1])}话的感想</p>
+    return `<p><span class="dbox">动画</span><span class="em05"> </span>义<span class="c1">妹</span>生活第${escapeXml(anime[1])}集随笔</p>
   <p class="ctit">（三河ごーすと感想）</p>`;
   }
 
   const sideStory = normalized.match(/^外传小说《(.+?)》(.+)$/);
   if (sideStory) {
-    return `<p><span class="ebox">外传小说</span><span class="em05"> </span>「${escapeXml(sideStory[1])}」${escapeXml(sideStory[2])}</p>`;
+    return `<p><span class="ebox">外传小说</span><span class="em05"> </span>《${escapeXml(sideStory[1])}》${escapeXml(sideStory[2])}</p>`;
   }
 
   return `<p class="em095">${escapeXml(normalized)}</p>`;
