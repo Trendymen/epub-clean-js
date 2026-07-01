@@ -435,7 +435,7 @@ test('buildLightNovelEpubFromBook uses leading illustration pages as another-day
     assert.doesNotMatch(toc, /第３话的感想/);
     assert.match(toc, /\.toc \.ctit\{font-family:"Source Han Serif SC SemiBold";font-size:0\.8em;padding:0\.25em 0 0;line-height:1\.15em;color:#4f4d4e\}/);
     assert.doesNotMatch(toc, /\.toc \.ctit\{[^}]*text-align:left/);
-    assert.match(toc, /<p class="ctit">　　（三河ごーすと感想）<\/p>/);
+    assert.match(toc, /<p class="ctit">　&#160;&#160;&#160;（三河ごーすと感想）<\/p>/);
     assert.match(toc, /<span class="ebox">外传小说<\/span>[\s\S]*《Goodbye》读卖栞/);
     assert.doesNotMatch(toc, /「Goodbye」读卖栞/);
     assert.match(toc, /href="illus0003\.xhtml"[\s\S]*第３集随笔/);
