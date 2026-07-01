@@ -384,7 +384,7 @@ function renderAnotherDaysTocTitle(title) {
   const anime = normalized.match(/^动画义妹生活第(.+?)集随笔（三河ごーすと感想）$/);
   if (anime) {
     return `<p><span class="dbox">动画</span><span class="em05"> </span>义<span class="c1">妹</span>生活第${escapeXml(anime[1])}集随笔</p>
-  <p class="ctit">（三河ごーすと感想）</p>`;
+  <p class="ctit">　　（三河ごーすと感想）</p>`;
   }
 
   const sideStory = normalized.match(/^外传小说《(.+?)》(.+)$/);
@@ -413,9 +413,8 @@ function setCssDeclaration(declarations, name, value, { after } = {}) {
 
 function tuneAnotherDaysTocStyle(style) {
   return style.replace(/\.toc \.ctit\{([^}]*)\}/, (match, declarations) => {
-    let tuned = setCssDeclaration(declarations, 'padding', '0.25em 0 0 3.6em');
+    let tuned = setCssDeclaration(declarations, 'padding', '0.25em 0 0');
     tuned = setCssDeclaration(tuned, 'line-height', '1.15em', { after: 'padding' });
-    tuned = setCssDeclaration(tuned, 'text-align', 'left', { after: 'line-height' });
     return `.toc .ctit{${tuned}}`;
   });
 }
