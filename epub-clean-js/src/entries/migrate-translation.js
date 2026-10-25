@@ -1,6 +1,7 @@
 import { parseArgs } from "node:util";
 import path from "node:path";
 import fs from "node:fs";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const { values: opts } = parseArgs({
   options: {
@@ -22,9 +23,10 @@ for (const k of ["src", "dst", "ref"]) {
   }
 }
 
-const profileMod = await import(path.resolve("books", opts.book, "profile.js"));
+const booksRoot = fileURLToPath(new URL("../../books/", import.meta.url));
+const profileMod = await import(pathToFileURL(path.resolve(booksRoot, opts.book, "profile.js")).href);
 const profile = profileMod.default;
-const migrateMod = await import(path.resolve("books", opts.book, "migrate/migrate-epub.js"));
+const migrateMod = await import(pathToFileURL(path.resolve(booksRoot, opts.book, "migrate/migrate-epub.js")).href);
 
 // out 可选：默认 profile.paths.translatedDir + filePatterns.translated(volume)
 const outDefault = path.join(

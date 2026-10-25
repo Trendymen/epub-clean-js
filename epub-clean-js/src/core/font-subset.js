@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import subsetFont from 'subset-font';
 
-const BOOKS = path.resolve(import.meta.dirname, '../../books');
+const BOOKS = fileURLToPath(new URL('../../books', import.meta.url));
 
 // 角色→字面映射依据 2026-06-10 字形渲染实证（日翻原字体 name 表被剥除，以 ≥240px 轮廓渲染对照思源各字重；
 // 72-100px 小图曾两次误判：ch1 实为太宋/アンチック、note 实为宋 Medium）：

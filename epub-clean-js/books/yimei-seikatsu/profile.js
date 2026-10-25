@@ -2,7 +2,7 @@
 //
 // 义妹生活书系 profile。承载书系特定决策（路径/卷号、卷首格言、插图清单、特典清单、注释偏好）。
 // core/ 通用代码 + entries/migrate-translation.js 通过 --book yimei-seikatsu 加载本文件。
-// 同时被 entries/heal.js、entries/align.js 复用（paths / vols / filePatterns / metadataDefaults）。
+// entries/heal.js、entries/align.js 共用 paths / filePatterns；align 使用 vols。
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 

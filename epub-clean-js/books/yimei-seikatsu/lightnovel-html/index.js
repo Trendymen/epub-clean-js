@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import * as OpenCC from 'opencc-js';
 import { parseHTML } from 'linkedom';
 
@@ -21,7 +22,7 @@ const TEXT_MEDIA_TYPE = 'application/xhtml+xml';
 const XML_HEADER = '<?xml version="1.0" encoding="utf-8"?>';
 // 脚注标记统一用 migrate 管线同款青绿「注」图标（books/yimei-seikatsu/assets/note.png），
 // 覆盖各卷日翻 styleRef 自带的红/绿版本，保证 09-13 全系列一致。
-const FOOTNOTE_ICON_GREEN = fs.readFileSync(path.join(import.meta.dirname, '../assets/note.png'));
+const FOOTNOTE_ICON_GREEN = fs.readFileSync(fileURLToPath(new URL('../assets/note.png', import.meta.url)));
 
 const SPECIAL_TEXT_IDS = [
   'specials0001',

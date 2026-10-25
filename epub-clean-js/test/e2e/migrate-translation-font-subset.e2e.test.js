@@ -1,37 +1,21 @@
 import { test } from "node:test";
 import assert from "node:assert";
-import { rm } from "node:fs/promises";
-import { spawn } from "node:child_process";
+import { rm, mkdtemp } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import AdmZip from "adm-zip";
+import { RAW_ROOT, runCli } from "./_helpers/run-cli.js";
 
-const PROJ = "/Users/liuzhuo/Downloads/资源/义妹生活";
-const SRC = `${PROJ}/义妹生活 - 09台简粗糙排版.epub`;
-const DST = `${PROJ}/[三河ごーすと].义妹生活.09.[日翻].epub`;
-const REF = `${PROJ}/[三河ごーすと].义妹生活.07.[台简].epub`;
-const OUT = "/tmp/yimei09-font-subset.e2e.epub";
+const SRC = path.join(RAW_ROOT, "义妹生活 - 09台简粗糙排版.epub");
+const DST = path.join(RAW_ROOT, "[三河ごーすと].义妹生活.09.[日翻].epub");
+const REF = path.join(RAW_ROOT, "[三河ごーすと].义妹生活.07.[台简].epub");
 
-function run(cmd, args, opts) {
-  return new Promise((resolve, reject) => {
-    const p = spawn(cmd, args, { stdio: "pipe", ...opts });
-    let stdout = "";
-    let stderr = "";
-    p.stdout.on("data", (d) => (stdout += d));
-    p.stderr.on("data", (d) => (stderr += d));
-    p.on("close", (code) =>
-      code === 0
-        ? resolve({ stdout, stderr })
-        : reject(new Error(`${cmd} exit ${code}: ${stderr}`)),
-    );
-  });
-}
-
-test("e2e: migrate-translation 输出只保留 6 个思源 subset 字体并在 OPF 标成 font/otf", { timeout: 180_000 }, async () => {
-  await rm(OUT, { force: true });
-  await run(
-    "node",
+test("e2e: migrate-translation 输出只保留 6 个思源 subset 字体并在 OPF 标成 font/otf", { timeout: 180_000 }, async (t) => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), 'yimei09-font-e2e-'));
+  t.after(() => rm(temp, { recursive: true, force: true }));
+  const out = path.join(temp, 'output.epub');
+  await runCli(
     [
-      "bin/cli.js",
       "migrate-translation",
       "--src",
       SRC,
@@ -40,16 +24,15 @@ test("e2e: migrate-translation 输出只保留 6 个思源 subset 字体并在 O
       "--ref",
       REF,
       "--out",
-      OUT,
+      out,
       "--volume",
       "09",
       "--book",
       "yimei-seikatsu",
     ],
-    { cwd: path.resolve(import.meta.dirname, "../..") },
   );
 
-  const zip = new AdmZip(OUT);
+  const zip = new AdmZip(out);
   const fontEntries = zip
     .getEntries()
     .filter((entry) => /^OEBPS\/Fonts\/[^/]+$/i.test(entry.entryName))
