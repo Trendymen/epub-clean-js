@@ -132,10 +132,16 @@ test('Japanese directory globs preserve their directory boundary for decomposed 
   const directory = 'incomingご'.normalize('NFD');
   const source = `${directory}/nested/deeper/${raw16.normalize('NFD')}`;
   const config = await fixture(t, [source, `outside/${raw16}`]);
+  const expected = path.join(config.paths.rawDir, source);
+  const expectedStat = await fs.stat(expected, { bigint: true });
   for (const input of ['incomingご/**/*三河[ご]ーすと*16*.epub', 'incoming[ご]/**/*16*.epub']) {
     const selected = await selectHealInputs(config, [input]);
     assert.deepEqual(selected.map(({ vol }) => vol), [16]);
-    assert.equal(selected[0].src, path.join(config.paths.rawDir, source));
+    assert.equal(selected[0].src.normalize('NFC'), expected.normalize('NFC'));
+    const actualStat = await fs.stat(selected[0].src, { bigint: true });
+    assert.ok(actualStat.isFile());
+    assert.equal(actualStat.dev, expectedStat.dev);
+    assert.equal(actualStat.ino, expectedStat.ino);
   }
 });
 

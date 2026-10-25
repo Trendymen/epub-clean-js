@@ -96,7 +96,7 @@ e2e 验收基线：normalized hash 与 `test/fixtures/yimei09/golden-manifest.js
 
 运行环境声明为 Node >=18。本次已在 Windows 的 Node 18.20.8 和 Node 22.23.2 上验证 `test:portability`，覆盖 heal 输入选择、Unicode 分解形式的日文源文件名、CLI 模块加载、默认资源路径、通用注释修复和 golden manifest 生成。glob 模式和待匹配路径统一转成 NFC 比较，读文件时保留文件系统返回的原路径。文件去重保留卷号差异，不会把两个独立文件仅凭 NFC 名称相同合并。
 
-`.github/workflows/portability.yml` 配置了 Windows、Linux、macOS × Node 18/22 的六组 CI，运行 `npm ci` 和 `npm run test:portability`。Linux/macOS 的运行结果需等 CI 执行后确认；本地写入 workflow 不代表这些平台已经验证通过。
+`.github/workflows/portability.yml` 配置了 Windows、Linux、macOS × Node 18/22 的六组 CI，运行 `npm ci` 和 `npm run test:portability`。各平台实际结果以对应提交的 CI 记录为准；本地检查只代表本机结果。
 
 ## 目录结构
 
