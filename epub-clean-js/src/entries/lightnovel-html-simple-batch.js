@@ -1,12 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { buildLightNovelEpub, buildLightNovelEpubFromBook } from '../../books/yimei-seikatsu/lightnovel-html/index.js';
 import { parseHyreadEpubToBook } from '../../books/yimei-seikatsu/hyread-parser.js';
 
-export const defaultRoot = path.resolve(import.meta.dirname, '../../..');
+export const defaultRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
 function normalizeFileName(name) {
   return name.normalize('NFC');

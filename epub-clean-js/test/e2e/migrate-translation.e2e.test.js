@@ -1,39 +1,24 @@
 import { test } from "node:test";
 import assert from "node:assert";
-import { readFile, rm, mkdir } from "node:fs/promises";
-import { spawn } from "node:child_process";
+import { readFile, rm, mkdtemp } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import os from "node:os";
 import path from "node:path";
-import { hashFile } from "./_helpers/diff.js";
+import AdmZip from "adm-zip";
+import { normalize } from "./_helpers/diff.js";
+import { RAW_ROOT, runCli } from "./_helpers/run-cli.js";
 
-const PROJ = "/Users/liuzhuo/Downloads/资源/义妹生活";
-const SRC = `${PROJ}/义妹生活 - 09台简粗糙排版.epub`;
-const DST = `${PROJ}/[三河ごーすと].义妹生活.09.[日翻].epub`;
-const REF = `${PROJ}/[三河ごーすと].义妹生活.07.[台简].epub`;
-const OUT = "/tmp/yimei09-node-e2e.epub";
-const UNPACK = "/tmp/yimei09-node-e2e-unpacked";
+const SRC = path.join(RAW_ROOT, "义妹生活 - 09台简粗糙排版.epub");
+const DST = path.join(RAW_ROOT, "[三河ごーすと].义妹生活.09.[日翻].epub");
+const REF = path.join(RAW_ROOT, "[三河ごーすと].义妹生活.07.[台简].epub");
 
-function run(cmd, args, opts) {
-  return new Promise((resolve, reject) => {
-    const p = spawn(cmd, args, { stdio: "pipe", ...opts });
-    let stdout = "";
-    let stderr = "";
-    p.stdout.on("data", (d) => (stdout += d));
-    p.stderr.on("data", (d) => (stderr += d));
-    p.on("close", (code) =>
-      code === 0
-        ? resolve({ stdout, stderr })
-        : reject(new Error(`${cmd} exit ${code}: ${stderr}`)),
-    );
-  });
-}
-
-test("e2e: migrate-translation 输出与 golden manifest normalized hash 100% 一致", { timeout: 180_000 }, async () => {
+test("e2e: migrate-translation 输出与 golden manifest normalized hash 100% 一致", { timeout: 180_000 }, async (t) => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), 'yimei09-manifest-e2e-'));
+  t.after(() => rm(temp, { recursive: true, force: true }));
+  const out = path.join(temp, 'output.epub');
   // 1. 跑 CLI
-  await rm(OUT, { force: true });
-  await run(
-    "node",
+  await runCli(
     [
-      "bin/cli.js",
       "migrate-translation",
       "--src",
       SRC,
@@ -42,24 +27,21 @@ test("e2e: migrate-translation 输出与 golden manifest normalized hash 100% �
       "--ref",
       REF,
       "--out",
-      OUT,
+      out,
       "--volume",
       "09",
       "--book",
       "yimei-seikatsu",
     ],
-    { cwd: path.resolve(import.meta.dirname, "../..") },
   );
 
-  // 2. 解包输出
-  await rm(UNPACK, { recursive: true, force: true });
-  await mkdir(UNPACK, { recursive: true });
-  await run("unzip", ["-q", OUT, "-d", UNPACK]);
+  // 2. 用独立 ZIP 实现读取输出。
+  const zip = new AdmZip(out);
 
   // 3. 读 golden manifest
   const manifest = JSON.parse(
     await readFile(
-      path.resolve(import.meta.dirname, "../fixtures/yimei09/golden-manifest.json"),
+      new URL("../fixtures/yimei09/golden-manifest.json", import.meta.url),
       "utf8",
     ),
   );
@@ -67,14 +49,14 @@ test("e2e: migrate-translation 输出与 golden manifest normalized hash 100% �
   // 4. 逐文件比对
   const mismatches = [];
   for (const [rel, expected] of Object.entries(manifest.files)) {
-    const fp = path.join(UNPACK, rel);
-    let actual;
-    try {
-      actual = await hashFile(fp);
-    } catch (e) {
+    const entry = zip.getEntry(rel);
+    if (!entry) {
       mismatches.push({ rel, reason: "missing" });
       continue;
     }
+    const actual = createHash("sha256")
+      .update(normalize(entry.getData(), path.posix.extname(rel)))
+      .digest("hex");
     if (actual !== expected.sha256_normalized) {
       mismatches.push({
         rel,

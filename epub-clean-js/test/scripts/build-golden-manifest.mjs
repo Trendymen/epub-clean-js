@@ -2,9 +2,10 @@
 import { readFile, readdir, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const ROOT = path.resolve(import.meta.dirname, "../fixtures/yimei09/golden-py");
-const OUT = path.resolve(import.meta.dirname, "../fixtures/yimei09/golden-manifest.json");
+const ROOT = fileURLToPath(new URL("../fixtures/yimei09/golden-py", import.meta.url));
+const OUT = fileURLToPath(new URL("../fixtures/yimei09/golden-manifest.json", import.meta.url));
 
 async function walk(dir, base = ROOT) {
   const ents = await readdir(dir, { withFileTypes: true });
@@ -12,7 +13,7 @@ async function walk(dir, base = ROOT) {
   for (const e of ents) {
     const full = path.join(dir, e.name);
     if (e.isDirectory()) out.push(...await walk(full, base));
-    else out.push(path.relative(base, full));
+    else out.push(path.relative(base, full).split(path.sep).join('/'));
   }
   return out;
 }
@@ -44,8 +45,8 @@ const manifest = {
 };
 
 for (const rel of files) {
-  const buf = await readFile(path.join(ROOT, rel));
-  const ext = path.extname(rel);
+  const buf = await readFile(path.join(ROOT, ...rel.split('/')));
+  const ext = path.posix.extname(rel);
   const normalized = normalize(buf, ext);
   const hash = createHash("sha256").update(normalized).digest("hex");
 

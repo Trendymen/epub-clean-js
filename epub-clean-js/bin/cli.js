@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const cmd = process.argv[2];
 const argv = process.argv.slice(3);
@@ -29,6 +29,6 @@ if (!entries[cmd]) {
   process.exit(2);
 }
 
-const mod = path.resolve(import.meta.dirname, entries[cmd]);
-process.argv = ["node", mod, ...argv];
-await import(mod);
+const modUrl = new URL(entries[cmd], import.meta.url);
+process.argv = ["node", fileURLToPath(modUrl), ...argv];
+await import(modUrl.href);

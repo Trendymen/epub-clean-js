@@ -3,7 +3,7 @@
   "version": "1.1.0",
   "private": true,
   "type": "module",
-  "description": "义妹生活 EPUB 处理工具集：09 卷台版译文迁移到日翻容器（STERA 排版） / 11-15 卷多看商店版反混淆 + 路径修复 + 排版对齐 / 通用注释升级到 09 台简 V8 多端兼容风格。Node ESM 实现。",
+  "description": "义妹生活 EPUB 处理工具集：09 卷台版译文迁移到日翻容器（STERA 排版） / 11 卷起日翻源反混淆与路径修复 / 11-15 卷排版对齐 / 通用注释升级到 09 台简 V8 多端兼容风格。Node ESM 实现。",
   "bin": {
     "epub-clean-js": "bin/cli.js"
   },
@@ -14,9 +14,10 @@
     "migrate-translation": "node bin/cli.js migrate-translation",
     "footnote-fix": "node bin/cli.js footnote-fix",
     "build:yimei-simple": "node bin/cli.js build-yimei-simple",
-    "test": "node --test --test-reporter=spec 'test/**/*.test.js'",
-    "test:unit": "node --test --test-reporter=spec 'test/unit/**/*.test.js'",
-    "test:e2e": "node --test --test-reporter=spec 'test/e2e/**/*.test.js'"
+    "test": "node test/run-tests.mjs",
+    "test:unit": "node test/run-tests.mjs unit",
+    "test:e2e": "node test/run-tests.mjs e2e",
+    "test:portability": "node --test --test-reporter=spec test/unit/heal-inputs.test.js test/unit/heal-cli.test.js test/unit/module-paths.test.js test/unit/golden-manifest.test.js test/e2e/footnote-fix.e2e.test.js"
   },
   "dependencies": {
     "adm-zip": "^0.5.16",
@@ -27,7 +28,9 @@
     "nunjucks": "^3.2.4",
     "opencc-js": "^1.3.1",
     "opentype.js": "^2.0.0",
+    "picomatch": "^4.0.7",
     "subset-font": "^2.5.0",
+    "tinyglobby": "^0.2.17",
     "yauzl-promise": "^4.0.0",
     "yazl": "^3.0.0"
   },
