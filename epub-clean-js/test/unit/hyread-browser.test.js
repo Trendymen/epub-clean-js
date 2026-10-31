@@ -288,3 +288,119 @@ test('cancelling a hanging audit image response closes its stream and withholds 
   assert.equal(f.api().status().restoration.ok, true);
   await assert.rejects(f.api().exportInfo());
 });
+
+test('expanded official TOC includes duplicate entries below the viewport', async (t) => {
+  const f = await fixture(t, { initialPage: 1, pages: [1, 1, 2], toc: [{ label: '同名', index: 1, y: 20 }, { label: '同名', index: 1, y: 700 }] });
+  await f.api().start({ session: f.session, ...timing, mode: 'audit' });
+  const { value } = await exportFixture(f.api());
+  assert.deepEqual(value.tocEntries, [{ label: '同名', src: 'xhtml/body1.xhtml' }, { label: '同名', src: 'xhtml/body1.xhtml' }]);
+});
+
+for (const initialBaseAhead of [false, true]) {
+  test(`startup never captures a stale document under initial React source (base ahead=${initialBaseAhead})`, async (t) => {
+    const f = await fixture(t, { initialChapter: 0, initialPage: 1, initialDocumentChapter: 2, initialBaseAhead });
+    await f.api().start({ session: f.session, ...timing });
+    const { value, bytes } = await exportFixture(f.api());
+    assert.match(value.data['xhtml/cover.xhtml'], /alt="封面"/);
+    assert.doesNotMatch(value.data['xhtml/cover.xhtml'], /圖前/);
+    assert.doesNotMatch(bytes.toString('utf8'), /fixture-private-context|openbook2\.jsp/);
+  });
+}
+
+async function waitUntil(predicate) {
+  const deadline = Date.now() + 3000;
+  while (!predicate() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 2));
+  assert.ok(predicate(), 'Fixture did not reach the requested observable state');
+}
+
+test('cancel waits for an issued chapter navigation before restoring and releasing the run', async (t) => {
+  const f = await fixture(t, { moveDelay: 100 });
+  const pending = f.api().start({ session: f.session, ...timing });
+  await waitUntil(() => f.navigationPending());
+  assert.deepEqual(f.position(), { chapter: 1, page: 2 });
+  f.api().cancel();
+  assert.equal((await pending).state, 'cancelled');
+  assert.deepEqual(f.position(), { chapter: 1, page: 2 });
+  assert.equal(f.api().status().restoration.ok, true);
+  await new Promise((resolve) => setTimeout(resolve, 180));
+  assert.deepEqual(f.position(), { chapter: 1, page: 2 });
+  assert.equal(f.navigationPending(), false);
+});
+
+test('unconfirmed navigation survives cancellation and blocks clear and the next start', async (t) => {
+  const options = { moveDelay: 500 };
+  const f = await fixture(t, options);
+  const pending = f.api().start({ session: f.session, timeoutMs: 60, pollMs: 2, stableSamples: 1 });
+  await waitUntil(() => f.navigationPending());
+  f.api().cancel();
+  assert.equal((await pending).state, 'cancelled');
+  assert.equal(f.api().status().restoration.ok, false);
+  assert.throws(() => f.api().clear(), /navigation/i);
+  await assert.rejects(f.api().start({ session: f.session, ...timing }), /navigation/i);
+  assert.throws(() => f.api().clear(), /navigation/i);
+  options.moveDelay = 0;
+  await waitUntil(() => !f.navigationPending());
+  assert.equal((await f.api().start({ session: f.session, ...timing })).state, 'complete');
+});
+
+for (const [name, responseOptions, message] of [
+  ['HTTP 503', { responseStatus: 503 }, /Resource HTTP 503/],
+  ['unexpected response URL', { responseUrl: 'https://service.ebook.hyread.com.tw/unexpected.opf' }, /Resource redirect/],
+]) {
+  test(`header rejection aborts and closes a hanging ${name} response body`, async (t) => {
+    const networkState = {};
+    const f = await fixture(t, { bodyHangOn: 'opf', networkState, ...responseOptions });
+    await assert.rejects(f.api().start({ session: f.session, ...timing }), message);
+    assert.equal(f.api().status().state, 'failed');
+    assert.equal(networkState.active, false);
+    assert.equal(networkState.closed, true);
+    assert.equal(networkState.aborted, true);
+    assert.match(f.api().status().errors[0], message);
+    await assert.rejects(f.api().exportInfo());
+  });
+}
+
+test('cancelling during restoration preserves an earlier independent OPF failure', async (t) => {
+  const f = await fixture(t, { changedOpf: true });
+  const pending = f.api().start({ session: f.session, ...timing, stableSamples: 10 }).then((value) => ({ value }), (error) => ({ error }));
+  await waitUntil(() => f.api().status().phase === 'restoring');
+  f.api().cancel();
+  const outcome = await pending;
+  assert.ok(outcome.error, 'The original independent failure must still reject');
+  assert.match(outcome.error.message, /Source OPF hash changed/);
+  assert.equal(f.api().status().state, 'failed');
+  assert.match(f.api().status().errors[0], /Source OPF hash changed/);
+  assert.equal(f.api().status().restoration.ok, true);
+});
+
+test('single-spine browser capture fails explicitly when a controlled association cannot be established', async (t) => {
+  const f = await fixture(t, { singleSpine: true, initialChapter: 0, initialPage: 1 });
+  await assert.rejects(f.api().start({ session: f.session, ...timing }), /Cannot establish document association/);
+  assert.equal(f.api().status().state, 'failed');
+  await assert.rejects(f.api().exportInfo());
+  assert.equal(f.navigationPending(), false);
+});
+
+test('cancel also settles an already issued audit page turn before restoring', async (t) => {
+  const f = await fixture(t, { moveDelay: 100 });
+  const pending = f.api().start({ session: f.session, ...timing, mode: 'audit' });
+  await waitUntil(() => f.api().status().phase === 'audit' && f.navigationPending() && f.position().chapter === 1 && f.position().page === 1);
+  f.api().cancel();
+  assert.equal((await pending).state, 'cancelled');
+  assert.equal(f.api().status().restoration.ok, true);
+  assert.deepEqual(f.position(), { chapter: 1, page: 2 });
+  await new Promise((resolve) => setTimeout(resolve, 180));
+  assert.deepEqual(f.position(), { chapter: 1, page: 2 });
+});
+
+test('cancel settles an already issued nonactive TOC click before restoring', async (t) => {
+  const f = await fixture(t, { moveDelay: 100 });
+  const pending = f.api().start({ session: f.session, ...timing, mode: 'audit' });
+  await waitUntil(() => f.api().status().phase === 'audit' && f.navigationPending() && f.position().chapter === 1 && f.position().page === 3);
+  f.api().cancel();
+  assert.equal((await pending).state, 'cancelled');
+  assert.equal(f.api().status().restoration.ok, true);
+  assert.deepEqual(f.position(), { chapter: 1, page: 2 });
+  await new Promise((resolve) => setTimeout(resolve, 180));
+  assert.deepEqual(f.position(), { chapter: 1, page: 2 });
+});

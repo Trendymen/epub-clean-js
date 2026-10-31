@@ -17,6 +17,7 @@
   const digest = async (bytes) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (byte) => byte.toString(16).padStart(2, '0')).join('');
   const emptyStatus = () => ({ state: 'idle', mode: null, phase: 'idle', progress: { completed: 0, total: 0, spineId: null, page: null, pageCount: null }, errors: [], restoration: { attempted: false, ok: false, error: null } });
   let state = emptyStatus(), cancelled = false, restoring = false, output = null, encoded = null, encodedSha = null, chunkView = null, settings, session;
+  let pendingNavigation = null, recoveryOrigin = null, settlingRecovery = false;
 
   function visibleArea(element, width = innerWidth, height = innerHeight) {
     const css = getComputedStyle(element);
@@ -55,7 +56,8 @@
     return { schemaVersion: 1, assetId: value.assetId, title: metadata.title, current: { spineId: value.item.spineId, src: value.src, page: value.page, pageCount: value.pageCount } };
   }
 
-  function checkCancel() { if (cancelled && !restoring) throw new Error('Workflow cancelled'); }
+  class WorkflowCancelled extends Error {}
+  function checkCancel() { if (cancelled && !restoring) throw new WorkflowCancelled('Workflow cancelled'); }
   function identity(value) {
     const metadata = reader().getBookMetadata();
     if (normalize(metadata?.title) !== normalize(session.title) || value.assetId !== session.assetId) throw new Error('Reader belongs to another book');
@@ -69,7 +71,7 @@
     return { src: value.src, page: value.page, doc, root: doc?.documentElement, body: doc?.body, html: doc?.body?.innerHTML };
   }
 
-  async function stable(expectedSrc, expectedPage, evidence) {
+  async function stable(expectedSrc, expectedPage, evidence, requireAssociation = true) {
     const deadline = Date.now() + settings.timeoutMs;
     let previous, count = 0, lastError;
     while (Date.now() < deadline) {
@@ -78,8 +80,10 @@
         const value = current();
         identity(value);
         const doc = value.frame.contentDocument;
-        evidence ??= documentEvidence({ ...value, doc });
-        const associated = value.src === evidence.src || doc !== evidence.doc || doc?.documentElement !== evidence.root || doc?.body !== evidence.body || doc?.body?.innerHTML !== evidence.html;
+        const base = doc?.querySelector('base[href]')?.getAttribute('href');
+        const baseMatches = base === value.item.src && doc.baseURI === value.item.src;
+        const transitioned = !evidence || value.src === evidence.src || doc !== evidence.doc || doc?.documentElement !== evidence.root || doc?.body !== evidence.body || doc?.body?.innerHTML !== evidence.html;
+        const associated = !requireAssociation || (baseMatches && transitioned);
         if (associated && (!expectedSrc || value.src === expectedSrc) && (!expectedPage || value.page === expectedPage) && doc?.readyState === 'complete' && doc.fonts?.status === 'loaded' && doc.body && (text(doc.body.textContent) || doc.body.querySelector('img,image'))) {
           const signature = `${value.src}\n${value.page}/${value.pageCount}\n${doc.body.innerHTML}`;
           count = signature === previous ? count + 1 : 1;
@@ -112,28 +116,48 @@
       check();
     });
     try { return await Promise.race([Promise.resolve().then(() => action(controller.signal)), guard]); }
+    catch (error) { controller.abort(); throw error; }
     finally { stopped = true; clearTimeout(timer); }
   }
 
-  async function invoke(method) {
+  async function navigate(action, target, evidence) {
     checkCancel();
-    const result = reader()[method]();
-    if (result?.then) await bounded(() => result, 'Reader action');
+    if (pendingNavigation) throw new Error('Unconfirmed reader navigation is still pending');
+    const navigation = { ...target, evidence, actionError: null, completion: null };
+    pendingNavigation = navigation;
+    try {
+      navigation.completion = Promise.resolve(action()).then(() => {}, (error) => { navigation.actionError = error; });
+    } catch (error) {
+      navigation.actionError = error;
+      navigation.completion = Promise.resolve();
+      throw error;
+    }
+    return settleNavigation();
+  }
+
+  async function settleNavigation() {
+    const navigation = pendingNavigation;
+    if (!navigation) return;
+    await bounded(() => navigation.completion, 'Reader action');
+    if (navigation.actionError) throw new Error(`Unconfirmed reader navigation: ${navigation.actionError.message}`);
+    const value = navigation.toc ? await tocDestination(navigation.evidence) : await stable(navigation.src, navigation.page, navigation.evidence);
+    if (pendingNavigation === navigation) pendingNavigation = null;
+    return value;
   }
 
   async function fetchBytes(url) {
     return bounded(async (signal) => {
       const deadline = Date.now() + settings.timeoutMs;
       const response = await fetch(url, { signal });
-      if (response.status !== 200) throw new Error(`Resource HTTP ${response.status}`);
-      if (response.url && response.url !== url) throw new Error('Resource redirect differs from observed URL');
-      if (!response.body) throw new Error('Empty resource response body');
-      const stream = response.body.getReader(), chunks = [];
+      const stream = response.body?.getReader(), chunks = [];
       let size = 0, finished = false;
       // 流取消失败时，保留原有的超时或取消原因。
-      const abortBody = () => { void stream.cancel().catch(() => {}); };
+      const abortBody = () => { if (stream) void stream.cancel().catch(() => {}); };
       signal.addEventListener('abort', abortBody, { once: true });
       try {
+        if (response.status !== 200) throw new Error(`Resource HTTP ${response.status}`);
+        if (response.url && response.url !== url) throw new Error('Resource redirect differs from observed URL');
+        if (!stream) throw new Error('Empty resource response body');
         if (signal.aborted) { abortBody(); throw new Error('Resource request aborted'); }
         while (true) {
           checkCancel();
@@ -149,19 +173,20 @@
         return bytes;
       } finally {
         signal.removeEventListener('abort', abortBody);
-        if (!finished || signal.aborted) await stream.cancel().catch(() => {});
-        stream.releaseLock();
+        if (stream) {
+          if (!finished || signal.aborted) await stream.cancel().catch(() => {});
+          stream.releaseLock();
+        }
       }
     }, 'Resource request');
   }
 
-  async function goTo(index) {
-    let value = await stable();
+  async function goTo(index, initialValue) {
+    let value = initialValue ?? await stable();
     for (let attempts = 0; value.src !== session.spine[index].href && attempts < session.spine.length; attempts++) {
       const previous = identity(value), next = previous + (previous < index ? 1 : -1);
       const evidence = documentEvidence(value);
-      await invoke(previous < index ? 'turnToNextChapter' : 'turnToPrevChapter');
-      value = await stable(session.spine[next].href, undefined, evidence);
+      value = await navigate(() => reader()[previous < index ? 'turnToNextChapter' : 'turnToPrevChapter'](), { src: session.spine[next].href }, evidence);
     }
     if (value.src !== session.spine[index].href) throw new Error('Unable to reach expected spine');
     return value;
@@ -170,11 +195,18 @@
   async function goToPage(value, target) {
     for (let attempts = 0; value.page !== target && attempts < 10000; attempts++) {
       const next = value.page + (value.page < target ? 1 : -1);
-      await invoke(value.page < target ? 'turnToNextPage' : 'turnToPrevPage');
-      value = await stable(value.src, next);
+      value = await navigate(() => reader()[value.page < target ? 'turnToNextPage' : 'turnToPrevPage'](), { src: value.src, page: next }, documentEvidence(value));
     }
     if (value.page !== target) throw new Error('Unable to restore expected page');
     return value;
+  }
+
+  async function establishDocument() {
+    const value = await stable(undefined, undefined, undefined, false);
+    if (session.spine.length < 2) throw new Error('Cannot establish document association without a controlled chapter transition');
+    const index = identity(value);
+    await goTo(index === 0 ? 1 : index - 1, value);
+    await goTo(index);
   }
 
   function resourceUrl(reference, src) {
@@ -223,23 +255,39 @@
       visibleBlocks.forEach((index) => seen.add(index));
       result.pageChecks.push({ page, total: value.pageCount, bodyUnchanged, visibleBlocks });
       if (!bodyUnchanged) { result.bodyChanges.push({ page, bodyText: text(value.doc.body.textContent) }); issues.push({ src: value.src, page, type: 'bodyChanged' }); }
-      if (page < result.pageCount) { await invoke('turnToNextPage'); value = await stable(value.src, page + 1); }
+      if (page < result.pageCount) value = await navigate(() => reader().turnToNextPage(), { src: value.src, page: page + 1 }, documentEvidence(value));
     }
     result.unseenTextBlocks = result.paragraphs.filter((paragraph) => paragraph.text && !seen.has(paragraph.index)).map((paragraph) => paragraph.index);
     if (result.unseenTextBlocks.length) issues.push({ src: value.src, type: 'unseenTextBlocks', blocks: result.unseenTextBlocks });
     return result;
   }
 
-  function tocButtons() { return Array.from(document.querySelectorAll('button[aria-label]')).filter((button) => button.getAttribute('aria-label') !== '目次' && text(button.innerText || button.textContent) && visibleArea(button) > 0); }
+  function tocButtons() {
+    const panels = Array.from(document.querySelectorAll('[role="tabpanel"]')).filter((panel) => {
+      for (let node = panel; node?.nodeType === 1; node = node.parentElement) {
+        const css = getComputedStyle(node);
+        if (node.hidden || node.getAttribute('aria-hidden') === 'true' || css.display === 'none' || css.visibility === 'hidden' || Number(css.opacity || 1) <= 0) return false;
+      }
+      return visibleArea(panel) > 0 && panel.querySelector('[role="menu"]');
+    });
+    if (!panels.length) return [];
+    if (panels.length !== 1) throw new Error('Ambiguous official table of contents panel');
+    const menus = panels[0].querySelectorAll('[role="menu"]');
+    if (menus.length !== 1) throw new Error('Unsupported official table of contents menu');
+    const buttons = Array.from(menus[0].querySelectorAll('button[role="menuitem"]'));
+    if (buttons.some((button) => !button.hasAttribute('aria-label') || !text(button.innerText || button.textContent))) throw new Error('Unsupported official table of contents entry');
+    return buttons;
+  }
   async function openToc() {
     const toggle = document.querySelector('button[aria-label="目次"]');
     if (!toggle) throw new Error('Missing official table of contents');
-    const before = new Set(tocButtons());
+    const existing = tocButtons();
+    if (existing.length) return existing;
     toggle.click();
     const deadline = Date.now() + settings.timeoutMs;
     while (Date.now() < deadline) {
       checkCancel();
-      const buttons = tocButtons().filter((button) => !before.has(button));
+      const buttons = tocButtons();
       if (buttons.length) return buttons;
       await sleep(settings.pollMs);
     }
@@ -287,8 +335,7 @@
       const previous = current(); identity(previous);
       const evidence = documentEvidence(previous);
       const active = buttons[index].getAttribute('aria-label').includes('正在閱讀此章節');
-      buttons[index].click();
-      const value = active ? await goToPage(await stable(previous.src), 1) : await tocDestination(evidence);
+      const value = active ? await goToPage(await stable(previous.src), 1) : await navigate(() => buttons[index].click(), { toc: true }, evidence);
       tocEntries.push({ label: labels[index], src: value.src });
       if (!visited.has(value.src)) { records.push(await auditSpine(value, issues)); visited.add(value.src); state.progress.completed++; }
     }
@@ -323,8 +370,19 @@
   }
 
   async function start(options) {
-    if (state.state === 'running') throw new Error('Workflow already running');
+    if (state.state === 'running' || settlingRecovery) throw new Error('Workflow already running');
     validateOptions(options);
+    if (pendingNavigation) {
+      settlingRecovery = true; restoring = true;
+      try {
+        await settleNavigation();
+        if (recoveryOrigin && settings.restore) {
+          await goToPage(await goTo(recoveryOrigin.index), recoveryOrigin.page);
+          state.restoration.ok = true; state.restoration.error = null;
+        }
+      } catch (error) { throw new Error(`Unconfirmed reader navigation; re-establish reader context: ${error.message}`); }
+      finally { restoring = false; settlingRecovery = false; }
+    }
     settings = { timeoutMs: 15000, pollMs: 150, stableSamples: 3, restore: true, ...options };
     session = clone(options.session);
     state = emptyStatus(); state.state = 'running'; state.mode = options.mode ?? 'capture'; state.phase = 'identity'; state.progress.total = session.spine.length;
@@ -334,24 +392,28 @@
     try {
       const value = current(); identity(value);
       initial = { index: identity(value), page: value.page };
+      recoveryOrigin = initial;
       const opf = await fetchBytes(`https://service.ebook.hyread.com.tw/ebookservice/epub/${session.assetId}/item/standard.opf`);
       if (await digest(opf) !== session.sourceOpfSha256) throw new Error('Source OPF hash changed');
-      await stable();
+      await establishDocument();
       state.phase = state.mode;
       result = await (state.mode === 'capture' ? capture() : audit());
       checkCancel();
     } catch (error) { failure = error; }
     finally {
-      if (initial && settings.restore) {
+      if (pendingNavigation || (initial && settings.restore)) {
         state.phase = 'restoring'; restoring = true; state.restoration.attempted = true;
-        try { await goToPage(await goTo(initial.index), initial.page); state.restoration.ok = true; }
+        try {
+          await settleNavigation();
+          if (initial && settings.restore) { await goToPage(await goTo(initial.index), initial.page); state.restoration.ok = true; }
+        }
         catch (error) { state.restoration.error = error.message; }
         finally { restoring = false; }
       }
     }
     if (failure || cancelled) {
-      state.state = cancelled ? 'cancelled' : 'failed'; state.phase = state.state;
-      if (failure && !cancelled) state.errors.push(failure.message);
+      state.state = failure && !(failure instanceof WorkflowCancelled) ? 'failed' : 'cancelled'; state.phase = state.state;
+      if (state.state === 'failed') state.errors.push(failure.message);
       if (state.state === 'failed') throw failure;
       return clone(state);
     }
@@ -386,5 +448,5 @@
 
   window.__hyreadWorkflow = Object.freeze({ version: 1, describe, start, status: () => clone(state),
     cancel: () => { if (state.state === 'running') cancelled = true; return clone(state); }, exportInfo, readChunk,
-    clear: () => { if (state.state === 'running') throw new Error('Workflow already running'); output = null; encoded = null; encodedSha = null; chunkView = null; session = null; settings = null; state = emptyStatus(); return clone(state); } });
+    clear: () => { if (pendingNavigation || settlingRecovery) throw new Error('Unconfirmed reader navigation prevents clear'); if (state.state === 'running') throw new Error('Workflow already running'); output = null; encoded = null; encodedSha = null; chunkView = null; session = null; settings = null; recoveryOrigin = null; state = emptyStatus(); return clone(state); } });
 })();

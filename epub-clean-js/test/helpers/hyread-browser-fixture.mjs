@@ -13,15 +13,25 @@ export async function createBrowserFixture(options = {}) {
   const session = { schemaVersion: 1, volume: '09', assetId: f.config.assetId, title: f.config.bookTitle, sourceOpfSha256: hash(f.opf), resourceRoot: 'resources/generations/fixture', spine,
     manifest: [...spine.map(({ id, href }) => ({ id, href, mediaType: 'application/xhtml+xml', properties: [] })), { id: 'image', href: 'images/pixel.png', mediaType: 'image/png', properties: [] }, { id: 'nav', href: 'nav.xhtml', mediaType: 'application/xhtml+xml', properties: ['nav'] }, { id: 'css', href: 'style.css', mediaType: 'text/css', properties: [] }],
     resources: Object.fromEntries(Object.entries(f.resources).map(([href, bytes]) => [href, { bytes: bytes.length, sha256: hash(bytes) }])) };
+  if (options.singleSpine) {
+    const opf = Buffer.from(f.opf.toString('utf8').replace(/<spine>.*?<\/spine>/s, '<spine><itemref idref="cover"/></spine>'));
+    f.resources['standard.opf'] = opf;
+    session.spine = spine.slice(0, 1);
+    session.sourceOpfSha256 = hash(opf);
+    session.resources['standard.opf'] = { bytes: opf.length, sha256: hash(opf) };
+  }
   const { document } = parseHTML('<html><body><button aria-label="目次">目次</button><span id="progress"></span></body></html>');
   let chapter = options.initialChapter ?? 1, page = options.initialPage ?? 2, panel = false, ticks = 0, moving = false;
   const pages = options.pages ?? [1, 3, 2];
-  let renderedChapter = chapter;
+  let renderedChapter = options.initialDocumentChapter ?? chapter;
   const timers = new Set();
   const documents = spine.map(({ href }) => parseHTML(f.capture.data[href]).document);
   documents[1].body.innerHTML = '<p id="first">前😀<img src="../images/pixel.png" alt="插圖"/>後 <ruby>字<rt>音</rt></ruby>。</p><p id="second">第二段</p><p id="hidden">未見文字</p><a href="#first">回上段</a>';
   if (options.foreignImage) documents[1].querySelector('img').setAttribute('src', 'https://foreign.test/pixel.png');
-  for (const doc of documents) {
+  for (const [index, doc] of documents.entries()) {
+    const base = doc.createElement('base'); base.setAttribute('href', new URL(spine[index].href, f.config.itemBase).href); doc.head.append(base);
+    Object.defineProperty(doc, 'baseURI', { get: () => doc.querySelector('base').getAttribute('href') });
+    Object.defineProperty(doc, 'URL', { value: 'https://service.ebook.hyread.com.tw/ebookservice/epubreader/hyread/v3/openbook2.jsp?data=fixture-private-context' });
     Object.defineProperty(doc, 'readyState', { get: () => options.loading ? 'loading' : 'complete' });
     Object.defineProperty(doc, 'fonts', { value: { get status() { return ticks < (options.fontTicks ?? 0) ? 'loading' : 'loaded'; } } });
     doc.documentElement.getBoundingClientRect = () => rect();
@@ -31,6 +41,7 @@ export async function createBrowserFixture(options = {}) {
       if (node.tagName.toLowerCase() === 'img') Object.defineProperties(node, { complete: { value: true }, naturalWidth: { value: 1 }, width: { value: 100 }, height: { value: 50 } });
     }
   }
+  if (options.initialBaseAhead) documents[renderedChapter].querySelector('base').setAttribute('href', new URL(spine[chapter].href, f.config.itemBase).href);
   const decoy = document.createElement('iframe');
   decoy.__reactFiber$fixture = { memoizedProps: { item: { spineId: 'foreign', src: 'https://foreign.test/item/old.xhtml', spineIndex: 0 } } };
   decoy.getBoundingClientRect = () => rect(-3000);
@@ -55,8 +66,9 @@ export async function createBrowserFixture(options = {}) {
       const changed = chapter !== nextChapter;
       chapter = nextChapter; page = nextPage; moving = false; update();
       if (!options.contentNever) {
-        if (changed && options.contentDelay) { const timer = setTimeout(() => { timers.delete(timer); renderedChapter = nextChapter; }, options.contentDelay); timers.add(timer); }
-        else renderedChapter = nextChapter;
+        const render = () => { renderedChapter = nextChapter; documents[nextChapter].querySelector('base').setAttribute('href', new URL(spine[nextChapter].href, f.config.itemBase).href); };
+        if (changed && options.contentDelay) { const timer = setTimeout(() => { timers.delete(timer); render(); }, options.contentDelay); timers.add(timer); }
+        else render();
       }
     };
     if (options.moveDelay) { moving = true; const timer = setTimeout(() => { timers.delete(timer); apply(); }, options.moveDelay); timers.add(timer); }
@@ -77,15 +89,18 @@ export async function createBrowserFixture(options = {}) {
   function renderToc() {
     if (!options.persistentToc) document.querySelector('#toc')?.remove();
     if ((panel || options.persistentToc) && !document.querySelector('#toc')) {
-      const nav = document.createElement('nav'); nav.id = 'toc';
+      const nav = document.createElement('div'); nav.id = 'toc'; nav.setAttribute('role', 'tabpanel');
+      nav.getBoundingClientRect = () => panel ? rect(0, 0, 300, 500) : rect(0, 0, 0, 0);
+      const menu = document.createElement('div'); menu.setAttribute('role', 'menu'); nav.append(menu);
       for (const entry of toc) {
-        const button = document.createElement('button'); button.dataset.chapter = String(entry.index); button.setAttribute('aria-label', `${entry.label}${entry.index === chapter ? ' 正在閱讀此章節' : ''}`); button.textContent = entry.label;
-        button.getBoundingClientRect = () => panel ? rect(0, 0, 100, 30) : rect(0, 0, 0, 0);
-        button.onclick = () => { panel = false; if (!options.persistentToc) nav.remove(); if (!options.tocNoNavigation) move(entry.index, 1); };
-        nav.append(button);
+        const button = document.createElement('button'); button.setAttribute('role', 'menuitem'); button.dataset.chapter = String(entry.index); button.setAttribute('aria-label', `${entry.label}${entry.index === chapter ? ' 正在閱讀此章節' : ''}`); button.textContent = entry.label;
+        button.getBoundingClientRect = () => panel ? rect(0, entry.y ?? 0, 100, 30) : rect(0, 0, 0, 0);
+        button.onclick = () => { panel = false; if (!options.persistentToc) nav.remove(); else nav.style.display = 'none'; if (!options.tocNoNavigation) move(entry.index, 1); };
+        menu.append(button);
       }
       document.body.append(nav);
     }
+    if (document.querySelector('#toc')) document.querySelector('#toc').style.display = panel ? 'block' : 'none';
   }
   document.querySelector('button').getBoundingClientRect = () => rect(0, 0, 100, 30);
   document.querySelector('button').onclick = () => { panel = !panel; renderToc(); };
@@ -104,8 +119,8 @@ export async function createBrowserFixture(options = {}) {
         const response = new Response(new ReadableStream({
           start() { options.networkState.active = true; },
           cancel() { options.networkState.active = false; options.networkState.closed = true; },
-        }));
-        Object.defineProperty(response, 'url', { value: String(url) });
+        }), { status: options.responseStatus ?? 200 });
+        Object.defineProperty(response, 'url', { value: options.responseUrl ?? String(url) });
         return response;
       }
       return options.changedOpf && String(url).endsWith('standard.opf') ? new Response('changed') : f.fetchImpl(url, init);
@@ -118,7 +133,7 @@ export async function createBrowserFixture(options = {}) {
     const result = vm.runInContext(await readFile(new URL('../../hyread/browser/capture-decrypted.js', import.meta.url), 'utf8'), context);
     if (result?.catch) result.catch(() => {});
   };
-  return { session, context, install, run: (code) => vm.runInContext(code, context), position: () => ({ chapter, page }), api: () => sandbox.__hyreadWorkflow,
+  return { session, context, install, run: (code) => vm.runInContext(code, context), position: () => ({ chapter, page }), navigationPending: () => moving, api: () => sandbox.__hyreadWorkflow,
     cleanup: async () => { for (const timer of timers) clearTimeout(timer); await f.cleanup(); } };
 }
 
