@@ -5,6 +5,53 @@ import { normalizeFootnoteIds, upgradeFootnotes } from '../../../src/core/stages
 
 import { buildSteraFootnote } from '../../../books/yimei-seikatsu/migrate/footnote-cleaner.js';
 
+for (const layout of ['aside target', 'paragraph inside aside', 'paragraph without aside', 'paragraph without aside and external reference']) {
+  test(`upgrade preserves the enclosing body list with a ${layout}`, () => {
+    const reference = '<sup><a class="calibre-footnote" href="#old_note" id="old_ref">注</a></sup>';
+    const externalReference = layout.endsWith('external reference');
+    const noteText = '<ruby>水星<rt>Mercury</rt></ruby>仅这段是脚注。';
+    const note = layout === 'aside target' ? `<aside id="old_note"><p>${noteText}</p><p>脚注后段。</p></aside>`
+      : layout === 'paragraph inside aside' ? `<aside><p id="old_note">${noteText}</p><p>脚注后段。</p></aside>`
+        : `<p id="old_note">${noteText}</p>`;
+    const input = `<html><body>${externalReference ? `<p id="external">外部正文${reference}外部结尾。</p>` : ''}<ul id="body_list"><li id="main_item"><p id="main_para">列表正文${externalReference ? '' : reference}继续正文。</p>${note}<p id="after_note">仍在列表内的正文。</p></li><li id="next_item">下一项。</li></ul><a href="#main_item">回正文项目</a><a href="#old_ref">回原引用</a><a href="#old_note">看注释</a></body></html>`;
+    const output = upgradeFootnotes(input);
+    const { document } = parseHTML(output);
+    const bodyList = document.getElementById('body_list');
+    assert.deepEqual([...bodyList.children].map((node) => node.id), ['main_item', 'next_item']);
+    const bodyItem = document.getElementById('main_item');
+    assert.deepEqual([...bodyItem.children].map((node) => node.id), ['main_para', 'after_note']);
+    assert.equal(bodyItem.textContent, '列表正文继续正文。仍在列表内的正文。');
+    assert.equal(document.getElementById('next_item').textContent, '下一项。');
+    const referenceParagraph = document.getElementById(externalReference ? 'external' : 'main_para');
+    const upgradedRef = referenceParagraph.querySelector('sub > a');
+    assert.ok(upgradedRef, '原引用须在原正文段落内替换');
+    assert.equal(referenceParagraph.firstChild.textContent, externalReference ? '外部正文' : '列表正文');
+    assert.equal(referenceParagraph.lastChild.textContent, externalReference ? '外部结尾。' : '继续正文。');
+    const upgradedNote = document.getElementById(upgradedRef.getAttribute('href').slice(1));
+    assert.equal(upgradedNote.parentElement, document.body);
+    assert.equal(document.querySelectorAll('aside').length, 1);
+    assert.equal(upgradedNote.textContent, `水星Mercury仅这段是脚注。${layout.includes('without') ? '' : '脚注后段。'}`);
+    assert.equal(upgradedNote.querySelector('ruby').outerHTML, '<ruby>水星<rt>Mercury</rt></ruby>');
+    assert.equal(upgradedRef.querySelector('img').getAttribute('zy-footnote'), `水星（Mercury）仅这段是脚注。${layout.includes('without') ? '' : '\n脚注后段。'}`);
+    const ids = [...document.querySelectorAll('[id]')].map((node) => node.id);
+    assert.equal(ids.length, new Set(ids).size);
+    for (const anchor of document.querySelectorAll('a[href^="#"]')) assert.ok(document.getElementById(anchor.getAttribute('href').slice(1)));
+    assert.equal(upgradeFootnotes(output), output);
+  });
+}
+
+test('upgrade preserves all paragraphs when a standalone li is the explicit note target', () => {
+  const input = '<html><body><p>正文<a epub:type="noteref" href="#old_note">注</a>结尾。</p><ol><li id="old_note"><p><ruby>水星<rt>Mercury</rt></ruby>脚注首段。</p><p>脚注后段。</p></li><li id="untouched">另一项保留。</li></ol></body></html>';
+  const output = upgradeFootnotes(input);
+  const { document } = parseHTML(output);
+  assert.equal(document.querySelector('aside').textContent, '水星Mercury脚注首段。脚注后段。');
+  assert.equal(document.querySelector('aside').querySelectorAll('p').length, 2);
+  assert.equal(document.getElementById('untouched').parentElement.tagName, 'OL');
+  assert.equal(document.getElementById('untouched').textContent, '另一项保留。');
+  assert.equal(document.querySelector('body > p').textContent, '正文结尾。');
+  assert.equal(upgradeFootnotes(output), output);
+});
+
 for (const withRuby of [false, true]) {
   test(`upgrade shares one note for repeated references ${withRuby ? 'with ruby' : 'without ruby'} and preserves child targets`, () => {
     const text = withRuby ? '<ruby>水星<rt>Mercury</rt></ruby>解释。' : '脚注详情。';

@@ -200,10 +200,12 @@ function findAnchors(document) {
 
 function footnoteScope(target, targets) {
   if (!target) return null;
-  const containingLi = target.closest('li');
   const aside = target.closest('aside');
-  if (containingLi) return containingLi;
-  if (aside && !targets.some((other) => other !== target && aside.contains(other))) return aside;
+  // 没有 aside 边界时，只移动链接明确指向的元素，保留外层正文。
+  if (!aside) return target;
+  const containingLi = target.closest('li');
+  if (containingLi && aside.contains(containingLi)) return containingLi;
+  if (!targets.some((other) => other !== target && aside.contains(other))) return aside;
   return target;
 }
 
