@@ -1,7 +1,26 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { parseHTML } from 'linkedom';
+import { upgradeFootnotes } from '../../../src/core/stages/footnote-fix.js';
 
 import { buildSteraFootnote } from '../../../books/yimei-seikatsu/migrate/footnote-cleaner.js';
+
+test('generated footnotes have one target per href', () => {
+  const [ref, aside] = buildSteraFootnote({ body: '注释正文' }, 1);
+  const { document } = parseHTML(`<html><body>${ref}${aside}</body></html>`);
+  const ids = [...document.querySelectorAll('[id]')].map((node) => node.id);
+  assert.equal(new Set(ids).size, ids.length);
+  assert.equal(document.querySelectorAll('[id="note001"]').length, 1);
+});
+
+test('upgrading old STERA duplicate targets preserves ruby, text and repeated execution', () => {
+  const input = '<html><body><p>正文<sub><a class="duokan-footnote" epub:type="noteref" href="#note001" id="note_ref001"><img width="25" src="../Images/note.png" zy-footnote="水星（Mercury）"/></a></sub>结尾</p><aside epub:type="footnote" id="note001"><ol class="duokan-footnote-content" style="list-style:none"><li class="duokan-footnote-item" id="note001"><p><ruby>水星<rt>Mercury</rt></ruby></p></li></ol></aside></body></html>';
+  const output = upgradeFootnotes(input);
+  assert.equal((output.match(/id="note001"/g) || []).length, 1);
+  assert.match(output, /<ruby>水星<rt>Mercury<\/rt><\/ruby>/);
+  assert.equal(upgradeFootnotes(output), output);
+  assert.equal(parseHTML(output).document.body.textContent, parseHTML(input).document.body.textContent);
+});
 
 test('buildSteraFootnote: basic', () => {
   const fn = {
@@ -89,12 +108,12 @@ test('buildSteraFootnote: V8 aside top-level is <ol>, no empty back-anchor', () 
   );
 });
 
-test('buildSteraFootnote: V8 li uses id="noteNNN" not value="NNN"', () => {
+test('buildSteraFootnote: V8 li keeps the aside as the sole target', () => {
   const fn = { text: '注：foo', imgFilename: 'note.webp' };
   const [, asideHtml] = buildSteraFootnote(fn, 4);
   assert.ok(
-    asideHtml.includes('<li class="duokan-footnote-item" id="note004">'),
-    `li 应用 id="note004"，实际: ${asideHtml}`,
+    asideHtml.includes('<li class="duokan-footnote-item">'),
+    `li 不重复 aside ID，实际: ${asideHtml}`,
   );
   assert.ok(!asideHtml.includes('value="004"'), 'li 不应含 value="004"');
   assert.ok(!asideHtml.includes('value="4"'), 'li 不应含 value="4"');
@@ -144,7 +163,7 @@ test('buildSteraFootnote: V8 完整结构 snapshot (注：foo, N=1)', () => {
   const expectedAside =
     '<aside epub:type="footnote" id="note001">' +
     '<ol class="duokan-footnote-content" style="list-style:none">' +
-    '<li class="duokan-footnote-item" id="note001">' +
+    '<li class="duokan-footnote-item">' +
     '<p>注：foo</p>' +
     '</li>' +
     '</ol>' +
@@ -167,7 +186,7 @@ test('buildSteraFootnote: V8 完整结构 snapshot (评：bar, N=2)', () => {
   const expectedAside =
     '<aside epub:type="footnote" id="note002">' +
     '<ol class="duokan-footnote-content" style="list-style:none">' +
-    '<li class="duokan-footnote-item" id="note002">' +
+    '<li class="duokan-footnote-item">' +
     '<p>评：bar</p>' +
     '</li>' +
     '</ol>' +

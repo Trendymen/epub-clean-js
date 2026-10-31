@@ -1,9 +1,7 @@
 import path from "node:path/posix";
 import { XMLParser } from "fast-xml-parser";
-import { XHTML_ATTR_RE } from "./patchers.js";
 import { readEpub } from "./zip-io.js";
 
-const PCT_CODES = ["%2A", "%3A", "%7C", "%3F"];
 const BAD_CHARS = ["*", "|", "?"];
 
 function hasBadChars(name) {
@@ -16,7 +14,7 @@ const parser = new XMLParser({
   preserveOrder: true,
   parseAttributeValue: false,
   trimValues: false,
-  processEntities: false,
+  processEntities: true,
 });
 
 function findFirst(nodes, tag) {
@@ -35,11 +33,11 @@ function findFirst(nodes, tag) {
 }
 
 function getAttr(node, name) {
-  return node[":@"]?.[name];
+  return node?.[":@"]?.[name];
 }
 
 function tagOf(node) {
-  for (const k of Object.keys(node)) if (k !== ":@") return k;
+  for (const k of Object.keys(node || {})) if (k !== ":@") return k;
   return null;
 }
 
@@ -100,80 +98,107 @@ export async function validateOutput(epubPath) {
     return { ok: false, issues, orphans, brokenLinks };
   }
 
-  // 4. manifest 每项文件存在
-  const opfDir = path.dirname(opfPath);
   const manifestPaths = new Set();
   const manifest = findFirst(opfTree, "manifest");
-  for (const item of findAll(opfTree, "item")) {
-    if (manifest && childrenOf(manifest).some((c) => c === item)) {
-      const href = getAttr(item, "href");
-      if (!href) continue;
-      const full =
-        opfDir && opfDir !== "." ? path.normalize(`${opfDir}/${href}`) : href;
-      manifestPaths.add(full);
-      if (!entries[full]) issues.push(`manifest 项不存在: ${full}`);
+  const isExternal = (value) => /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(value);
+  const decode = (value) => decodeURIComponent(value);
+  const resolveReference = (from, value) => {
+    if (!value || isExternal(value)) return null;
+    const hash = value.indexOf('#');
+    const resource = (hash < 0 ? value : value.slice(0, hash)).split('?')[0];
+    const fragment = hash < 0 ? '' : decode(value.slice(hash + 1));
+    return {
+      target: resource ? path.normalize(path.join(path.dirname(from), decode(resource))) : from,
+      fragment,
+    };
+  };
+  for (const item of childrenOf(manifest) || []) {
+    if (tagOf(item) !== 'item') continue;
+    const href = getAttr(item, 'href');
+    try {
+      const resolved = resolveReference(opfPath, href);
+      if (!resolved) continue;
+      manifestPaths.add(resolved.target);
+      if (!entries[resolved.target]) issues.push('manifest 项不存在: ' + resolved.target);
+    } catch (error) {
+      issues.push('manifest 引用错误: ' + href + ': ' + error.message);
     }
   }
 
-  // 5. xhtml 引用解析后存在 → broken-link
-  for (const n of names) {
-    if (!n.endsWith(".xhtml") && !n.endsWith(".html")) continue;
-    const text = entries[n].toString("utf-8");
-    const xhDir = path.dirname(n);
-    for (const m of text.matchAll(XHTML_ATTR_RE)) {
-      const v = m[3];
-      if (
-        !v ||
-        v.startsWith("data:") ||
-        v.startsWith("http://") ||
-        v.startsWith("https://") ||
-        v.startsWith("#") ||
-        v.startsWith("mailto:") ||
-        v.startsWith("tel:")
-      ) {
-        continue;
+  const trees = new Map();
+  const idsByFile = new Map();
+  const walk = function* (nodes) {
+    for (const node of nodes) {
+      yield node;
+      const children = childrenOf(node);
+      if (Array.isArray(children)) yield* walk(children);
+    }
+  };
+  for (const name of names) {
+    if (!/\.(?:xhtml|html|ncx)$/i.test(name)) continue;
+    try {
+      const tree = parser.parse(entries[name].toString('utf8'));
+      trees.set(name, tree);
+      const ids = new Set();
+      for (const node of walk(tree)) {
+        const id = getAttr(node, 'id') || getAttr(node, 'xml:id');
+        if (!id) continue;
+        if (ids.has(id)) issues.push(name + ': 重复 ID ' + id);
+        ids.add(id);
       }
-      const p = v.split("#", 1)[0];
-      if (!p) continue;
-      const target = path.normalize(`${xhDir}/${p}`);
+      idsByFile.set(name, ids);
+    } catch (error) {
+      issues.push(name + ': 解析失败: ' + error.message);
+    }
+  }
+
+  const checkReference = (from, value) => {
+    try {
+      const resolved = resolveReference(from, value?.trim());
+      if (!resolved) return;
+      const { target, fragment } = resolved;
       if (!entries[target]) {
-        brokenLinks.push(`${n}: 引用 ${v} → ${target} 不存在`);
+        brokenLinks.push(from + ': 引用 ' + value + ' → ' + target + ' 不存在');
+      } else if (fragment && idsByFile.has(target) && !idsByFile.get(target).has(fragment)) {
+        brokenLinks.push(from + ': 引用 ' + value + ' → ' + target + ' 缺少 fragment #' + fragment);
+      }
+    } catch (error) {
+      brokenLinks.push(from + ': 引用 ' + value + ' 无法解析: ' + error.message);
+    }
+  };
+  const checkCss = (name, css) => {
+    const text = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    for (const match of text.matchAll(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*?))\s*\)|@import\s+(?:"([^"]*)"|'([^']*)')/gi)) {
+      checkReference(name, match.slice(1).find((value) => value !== undefined));
+    }
+  };
+  for (const [name, tree] of trees) {
+    for (const node of walk(tree)) {
+      for (const attr of ['href', 'src', 'xlink:href', 'poster']) {
+        const value = getAttr(node, attr);
+        if (value) checkReference(name, value);
+      }
+      const style = getAttr(node, 'style');
+      if (style) checkCss(name, style);
+      if (tagOf(node) === 'style') {
+        checkCss(name, childrenOf(node).map((child) => child['#text'] || '').join(''));
       }
     }
   }
-
-  // 6. 文本资源无 percent 残留
-  for (const n of names) {
-    if (
-      !n.endsWith(".xhtml") &&
-      !n.endsWith(".html") &&
-      !n.endsWith(".css") &&
-      !n.endsWith(".opf") &&
-      !n.endsWith(".ncx")
-    ) {
-      continue;
-    }
-    const text = entries[n].toString("utf-8");
-    for (const code of PCT_CODES) {
-      if (text.includes(code)) {
-        issues.push(`${n}: 含 percent 残留 ${code}`);
-        break;
-      }
-    }
+  for (const name of names) {
+    if (/\.css$/i.test(name)) checkCss(name, entries[name].toString('utf8'));
   }
 
-  // 7. CSS url() 引用无字面 *|? 字符（验证孤儿 @font-face 清理彻底）
-  // 注：CSS 选择器中的 *|? 是合法通配/属性匹配符，不算混淆残留。
-  // 只检查 url(...) 内部引用。
-  for (const n of names) {
-    if (!n.endsWith(".css")) continue;
-    const text = entries[n].toString("utf-8");
-    const urlMatches = text.match(/url\([^)]+\)/g) || [];
-    for (const u of urlMatches) {
-      if (/[*|?]/.test(u)) {
-        issues.push(`${n}: CSS url() 含字面混淆字符 (孤儿 @font-face 未清理彻底): ${u}`);
-        break;
-      }
+  const packageNode = findFirst(opfTree, 'package');
+  const identifierId = getAttr(packageNode, 'unique-identifier');
+  const identifierNode = findAll(opfTree, 'dc:identifier').find((node) => getAttr(node, 'id') === identifierId);
+  const identifier = (childrenOf(identifierNode) || []).map((node) => node['#text'] || '').join('').trim();
+  if (!identifierId || !identifier) issues.push('OPF unique-identifier 未指向有效标识');
+  for (const [name, tree] of trees) {
+    if (!/\.ncx$/i.test(name)) continue;
+    const uid = findAll(tree, 'meta').find((node) => getAttr(node, 'name') === 'dtb:uid');
+    if (!identifier || getAttr(uid, 'content') !== identifier) {
+      issues.push(name + ': NCX dtb:uid 与 OPF 标识不一致');
     }
   }
 
@@ -189,5 +214,5 @@ export async function validateOutput(epubPath) {
     if (!manifestPaths.has(n)) orphans.push(n);
   }
 
-  return { ok: issues.length === 0, issues, orphans, brokenLinks };
+  return { ok: issues.length === 0 && brokenLinks.length === 0, issues, orphans, brokenLinks };
 }

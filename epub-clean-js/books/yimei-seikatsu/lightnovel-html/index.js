@@ -7,7 +7,8 @@ import { parseHTML } from 'linkedom';
 
 import { readEpub, writeEpub } from '../../../src/core/zip-io.js';
 import { applyToFiles } from '../../../src/core/font-subset.js';
-import { buildSteraFootnote, selfCloseVoidTags } from '../../../src/core/stages/footnote-fix.js';
+import { buildSteraFootnote, normalizeFootnoteIds, selfCloseVoidTags } from '../../../src/core/stages/footnote-fix.js';
+import { validateOutput } from '../../../src/core/validator.js';
 import { MESSAGE_DISCLAIMER_LINES } from '../migrate/extras-cleaner.js';
 import { anotherDaysFixedFootnotesForChapter } from '../another-days-footnotes.js';
 
@@ -1078,7 +1079,7 @@ function collectSpecialEntries(styleRef) {
       : `OEBPS/Text/${idref.replace(/\.xhtml$/, '')}.xhtml`;
     const rawContent = styleRef.entries[epubPath]?.toString('utf8');
     if (!rawContent) continue;
-    const content = normalizeSpecialRefs(selfCloseVoidTags(rawContent));
+    const content = normalizeFootnoteIds(normalizeSpecialRefs(selfCloseVoidTags(rawContent)));
     const id = path.posix.basename(epubPath).replace(/\.xhtml$/, '');
 
     for (const imageRef of extractImageRefsFromXhtml(content)) {
@@ -1585,9 +1586,10 @@ export async function buildLightNovelEpubFromBook(book, {
     bodyHref,
   }), 'nav', false);
 
+  const bookUuid = randomUUID();
   files['OEBPS/toc.ncx'] = renderTocNcx({
     title: book.title,
-    uuid: randomUUID(),
+    uuid: bookUuid,
     entries: navEntries,
   });
 
@@ -1662,7 +1664,7 @@ export async function buildLightNovelEpubFromBook(book, {
   files['OEBPS/content.opf'] = buildContentOpf({
     title: book.title,
     volume,
-    uuid: randomUUID(),
+    uuid: bookUuid,
     modifiedIso,
     manifestItems,
     spineItems,
@@ -1670,7 +1672,19 @@ export async function buildLightNovelEpubFromBook(book, {
     hasPre,
   });
 
-  await writeEpub(outEpubPath, files);
+  await fs.promises.mkdir(path.dirname(outEpubPath), { recursive: true });
+  const stagingDir = await fs.promises.mkdtemp(path.join(path.dirname(outEpubPath), '.epub-build-'));
+  const stagingPath = path.join(stagingDir, 'book.epub');
+  try {
+    await writeEpub(stagingPath, files);
+    const validation = await validateOutput(stagingPath);
+    if (!validation.ok) {
+      throw new Error(`EPUB 校验失败：${[...validation.issues, ...validation.brokenLinks].join('；')}`);
+    }
+    await fs.promises.rename(stagingPath, outEpubPath);
+  } finally {
+    await fs.promises.rm(stagingDir, { recursive: true, force: true });
+  }
   return { book, images, outEpubPath };
 }
 

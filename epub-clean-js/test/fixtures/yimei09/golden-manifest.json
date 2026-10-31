@@ -155,8 +155,8 @@
       "bytes": 2521
     },
     "OEBPS/Text/chapter0001.xhtml": {
-      "sha256_normalized": "2c87e219e91958d54cbd4920db1480eeae5f8e5694fc1b0ec782534cd0260b82",
-      "bytes": 50899,
+      "sha256_normalized": "f26588ad9c960a49ab5647529a5336a3d926591120209b67f6288bfa1d5af653",
+      "bytes": 50886,
       "para_count": 528,
       "footnote_count": 1
     },
@@ -167,14 +167,14 @@
       "footnote_count": 0
     },
     "OEBPS/Text/chapter0003.xhtml": {
-      "sha256_normalized": "35672e18dd9f5422f82c5c1c442a0c7d5ad5b70f1bb2dcf31d7c9447bb478823",
-      "bytes": 55599,
+      "sha256_normalized": "503de6058f70f18b42a040b2e963a32ddd47ac8fd5f8525a404656c4362baeb2",
+      "bytes": 55560,
       "para_count": 585,
       "footnote_count": 3
     },
     "OEBPS/Text/chapter0004.xhtml": {
-      "sha256_normalized": "ea77e7de4a5d2537d9c6a2e184779a45f29c369c0ae66f89e0db345c13a15c8e",
-      "bytes": 47513,
+      "sha256_normalized": "c6d76fdd4804b1066366129eddf224b396b42dee32812dbf833976be123f9ecc",
+      "bytes": 47500,
       "para_count": 498,
       "footnote_count": 1
     },
@@ -191,8 +191,8 @@
       "footnote_count": 0
     },
     "OEBPS/Text/chapter0007.xhtml": {
-      "sha256_normalized": "61dea7f43bca780dd0cd29f23bbbf638f0e298d4a687cfaeaa74645cbac99a62",
-      "bytes": 38876,
+      "sha256_normalized": "3e76739c6605a8ac6c27e486fb8e1b974f61315a4a9627df6bf47499bda74349",
+      "bytes": 38863,
       "para_count": 418,
       "footnote_count": 1
     },
@@ -209,20 +209,20 @@
       "footnote_count": 0
     },
     "OEBPS/Text/chapter0010.xhtml": {
-      "sha256_normalized": "228ca09e98af95ddf1f27988c3913eb2f0252d271176497fe5644b504254f97e",
-      "bytes": 20688,
+      "sha256_normalized": "99ace3896311a541c14dc87d7271d90e687536e9819b998ef2644b2ed1428ffe",
+      "bytes": 20675,
       "para_count": 215,
       "footnote_count": 1
     },
     "OEBPS/Text/chapter0011.xhtml": {
-      "sha256_normalized": "8749d52ad3e0c9a8ed373dcc9e629b390800c6d943a92448dcabafec7edfaf95",
-      "bytes": 37448,
+      "sha256_normalized": "6bb6b2a318f695de1b0ba56bd7547d3f83af7495b70075cd3fd8021657e8e83a",
+      "bytes": 37435,
       "para_count": 401,
       "footnote_count": 1
     },
     "OEBPS/Text/chapter0012.xhtml": {
-      "sha256_normalized": "2253f1ef15c61f3ed0db36793c33c02a4d2a8ae7fab4c7ae874848a62e09a114",
-      "bytes": 27185,
+      "sha256_normalized": "51aebe0d94023b82038698e8d682bd5c88af51eef4b3297ab85f42a05b45f4d6",
+      "bytes": 27159,
       "para_count": 297,
       "footnote_count": 2
     },
@@ -267,8 +267,8 @@
       "bytes": 545
     },
     "OEBPS/Text/special0001.xhtml": {
-      "sha256_normalized": "a1ea4f31f3b8ce5d176cf5c74e59bc42f24b4c9a21ecfd5a09abd0e450ba1a54",
-      "bytes": 5495,
+      "sha256_normalized": "4c7f34e1120f2e4044cab489e5bd0b9c38697eeda142216ec7fe27bcabda4916",
+      "bytes": 5482,
       "para_count": 48,
       "footnote_count": 1
     },

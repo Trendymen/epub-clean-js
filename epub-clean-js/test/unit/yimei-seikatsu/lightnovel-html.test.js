@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
@@ -18,6 +18,37 @@ import { rubyAnnotationsForVolume } from '../../../src/entries/lightnovel-html-s
 import { readEpub, writeEpub } from '../../../src/core/zip-io.js';
 import { parseHyreadEpubToBook, parseAnotherDaysEpubToBook } from '../../../books/yimei-seikatsu/hyread-parser.js';
 import { writeHyreadFixture, bodyParagraph as hyreadP } from '../../helpers/hyread-fixture.js';
+
+test('builder shares its UUID, normalizes imported note IDs and preserves an existing output on invalid references', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-integrity-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const source = join(dir, 'source.epub');
+  const ref = join(dir, 'ref.epub');
+  const style = join(dir, 'style.epub');
+  const out = join(dir, 'out.epub');
+  await writeHyreadFixture(source, { pages: { 'p-001.xhtml': hyreadP('正文（註：注解）') } });
+  await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
+  const special = '<html><head><title>特典</title></head><body><p>原文<sub><a class="duokan-footnote" epub:type="noteref" href="#note001" id="note_ref001"><img src="../Images/note.png" width="25"/></a></sub></p><aside epub:type="footnote" id="note001"><ol class="duokan-footnote-content"><li class="duokan-footnote-item" id="note001"><p><ruby>水星<rt>Mercury</rt></ruby></p></li></ol></aside></body></html>';
+  await writeEpub(style, { 'OEBPS/Text/special0001.xhtml': special, 'OEBPS/Images/note.png': Buffer.from('icon') });
+  const build = async () => {
+    const book = await parseHyreadEpubToBook(source, { volume: '14' });
+    return buildLightNovelEpubFromBook(book, { sourceImages: book._sourceImages, refEpubPath: ref, styleRefEpubPath: style, outEpubPath: out });
+  };
+  await build();
+  const epub = await readEpub(out);
+  const opf = new XMLParser({ ignoreAttributes: false }).parse(epub.entries['OEBPS/content.opf']);
+  const ncx = new XMLParser({ ignoreAttributes: false }).parse(epub.entries['OEBPS/toc.ncx']);
+  assert.equal(ncx.ncx.head.meta.find((meta) => meta['@_name'] === 'dtb:uid')['@_content'], opf.package.metadata['dc:identifier']['#text']);
+  const imported = epub.entries['OEBPS/Text/special0001.xhtml'].toString();
+  assert.equal(imported, special.replace('<li class="duokan-footnote-item" id="note001">', '<li class="duokan-footnote-item">'));
+  assert.equal((imported.match(/id="note001"/g) || []).length, 1);
+  assert.match(imported, /<ruby>水星<rt>Mercury<\/rt><\/ruby>/);
+  const previous = await readFile(out);
+  await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': 'p{background:url(missing.png)}', 'OEBPS/Misc/script.js': '' });
+  await assert.rejects(build(), /校验失败/);
+  assert.deepEqual(await readFile(out), previous);
+  assert.deepEqual((await readdir(dir)).sort(), ['out.epub', 'ref.epub', 'source.epub', 'style.epub']);
+});
 
 test('HyRead renders native ruby in chapters, preface and afterword without annotating ordinary matches', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'ln-hyread-inline-'));

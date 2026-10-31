@@ -125,13 +125,27 @@ export function buildSteraFootnote(fn, newIdNumber, opts = {}) {
   const asideHtml =
     `<aside epub:type="footnote" id="${newId}">` +
     `<ol class="duokan-footnote-content" style="list-style:none">` +
-    `<li class="duokan-footnote-item" id="${newId}">` +
+    `<li class="duokan-footnote-item">` +
     `<p>${escapeText(body)}</p>` +
     `</li>` +
     `</ol>` +
     `</aside>`;
 
   return [refHtml, asideHtml];
+}
+
+export function normalizeFootnoteIds(xhtml) {
+  return xhtml.replace(/<aside\b[^>]*>[\s\S]*?<\/aside>/gi, (aside) => {
+    const { document } = parseHTML(aside);
+    const node = document.querySelector('aside');
+    if (node?.getAttribute('epub:type') !== 'footnote' || !node.id) return aside;
+    return aside.replace(/<li\b[^>]*>/gi, (tag) => {
+      const { document: fragment } = parseHTML(tag + '</li>');
+      const li = fragment.querySelector('li');
+      if (!li?.classList.contains('duokan-footnote-item') || li.id !== node.id) return tag;
+      return tag.replace(/\s+id\s*=\s*(?:"[^"]*"|'[^']*')/i, '');
+    });
+  });
 }
 
 /**
@@ -218,7 +232,8 @@ function extractBody(anchor, document) {
  * @returns {string}
  */
 export function upgradeFootnotes(xhtml, opts = {}) {
-  const { document } = parseHTML(xhtml);
+  xhtml = normalizeFootnoteIds(xhtml);
+  const { document } = parseHTML(xhtml.replace(/^<\?xml[^?]*\?>\s*/, ''));
 
   // 先 unwrap 非标准 <note> 容器（部分旧 epub 把 <p>+anchor+<aside> 全包在 <note> 里）。
   // 把其子节点提升到父级、再删除 <note> 标签本身，这样：
@@ -236,19 +251,28 @@ export function upgradeFootnotes(xhtml, opts = {}) {
   if (anchors.length === 0) return xhtml;
 
   // pre-pass 收集所有 anchor + body（避免遍历过程中 DOM 变化导致 querySelector 失效）
-  const items = anchors.map((a) => ({
-    anchor: a,
-    text: extractBody(a, document),
-  }));
+  const items = anchors.map((anchor) => {
+    const target = document.getElementById(anchor.getAttribute('href').slice(1));
+    const paragraph = target?.querySelector('li p, p');
+    return {
+      anchor,
+      text: paragraph?.querySelector('ruby')
+        ? (anchor.querySelector('img')?.getAttribute('zy-footnote') || extractBody(anchor, document))
+        : extractBody(anchor, document),
+      bodyHtml: paragraph?.querySelector('ruby') ? paragraph.innerHTML : null,
+    };
+  });
 
   // 删除原 aside 块（避免新旧并存）
   for (const a of [...document.querySelectorAll('aside')]) a.remove();
 
   const asides = [];
   for (let i = 0; i < items.length; i++) {
-    const { anchor, text } = items[i];
+    const { anchor, text, bodyHtml } = items[i];
     const imgFilename = pickIcon(text, opts);
-    const [refHtml, asideHtml] = buildSteraFootnote({ text, imgFilename }, i + 1, opts);
+    const [refHtml, plainAsideHtml] = buildSteraFootnote({ text, imgFilename }, i + 1, opts);
+    const asideHtml = bodyHtml === null ? plainAsideHtml
+      : plainAsideHtml.replace(/<p>[\s\S]*?<\/p>/, () => `<p>${bodyHtml}</p>`);
 
     // 替换锚点（连同外层 sub/sup 一并替换，避免出现嵌套 sub）
     let replaceTarget = anchor;

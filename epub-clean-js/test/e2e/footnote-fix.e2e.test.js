@@ -74,9 +74,11 @@ test("e2e: footnote-fix 升级 V3-duokan-minimal epub 到 V8 STERA", { timeout: 
   );
   assert.match(
     chapterContent,
-    /<li class="duokan-footnote-item" id="note001"/,
-    "li id 应为 note001",
+    /<li class="duokan-footnote-item">/,
+    "li 不重复 aside ID",
   );
+  const ids = [...chapterContent.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]);
+  assert.equal(new Set(ids).size, ids.length, "章节 ID 必须唯一");
   // V8：li 内 <p> 直接含正文，不再有 "<a href="#note_refNNN">注N</a>：" 反向链接前缀
   assert.ok(
     !chapterContent.includes('<a href="#note_ref001">'),
@@ -84,7 +86,7 @@ test("e2e: footnote-fix 升级 V3-duokan-minimal epub 到 V8 STERA", { timeout: 
   );
   assert.match(
     chapterContent,
-    /<li class="duokan-footnote-item" id="note001"><p>[^<]/,
+    /<li class="duokan-footnote-item"><p>[^<]/,
     "V8：li 内 <p> 应直接含正文文本",
   );
 
