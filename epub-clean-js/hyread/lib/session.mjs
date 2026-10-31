@@ -20,8 +20,12 @@ function checkDeclarations(manifest, spine) {
     ids.set(item.id, item);
     hrefs.add(item.href);
   }
-  const paths = [...hrefs].sort();
-  for (let i = 1; i < paths.length; i++) if (paths[i].startsWith(`${paths[i - 1]}/`)) throw new Error('Resource file and directory collision');
+  for (const href of hrefs) {
+    const parts = href.split('/');
+    for (let depth = 1; depth < parts.length; depth++) {
+      if (hrefs.has(parts.slice(0, depth).join('/'))) throw new Error('Resource file and directory collision');
+    }
+  }
   const seen = new Set();
   for (const item of spine) {
     if (!isObject(item) || seen.has(item.id) || !ids.has(item.id) || ids.get(item.id).href !== item.href) throw new Error('Invalid or duplicate spine reference');
@@ -60,6 +64,37 @@ export function validateSession(session) {
 function generationConfig(config, session) {
   const resourcesDir = join(config.workDir, session.resourceRoot);
   return { ...config, resourcesDir, itemDir: join(resourcesDir, 'ebookservice', 'epub', config.assetId, 'item') };
+}
+
+async function readOptionalJson(workDir, href) {
+  const path = await safeJoin(workDir, href);
+  try { await lstat(path); }
+  catch (error) { if (error.code === 'ENOENT') return undefined; throw error; }
+  return JSON.parse(await readFile(path, 'utf8'));
+}
+
+function assertSameBook(identity, config) {
+  if (!isObject(identity) || identity.assetId !== config.assetId || identity.volume !== config.volume || identity.title !== config.bookTitle) {
+    throw new Error('Work directory belongs to another book');
+  }
+}
+
+async function checkBookMetadata(config) {
+  const binding = await readOptionalJson(config.workDir, 'book-identity.json');
+  if (binding !== undefined) assertSameBook(binding, config);
+  const previous = await readOptionalJson(config.workDir, 'session.json');
+  if (previous !== undefined) assertSameBook(validateSession(previous), config);
+}
+
+async function bindBook(config) {
+  const path = await safeJoin(config.workDir, 'book-identity.json');
+  const bytes = JSON.stringify({ volume: config.volume, assetId: config.assetId, title: config.bookTitle }) + '\n';
+  try { await writeFileAtomic(path, bytes); }
+  catch (error) {
+    const binding = await readOptionalJson(config.workDir, 'book-identity.json');
+    if (binding !== undefined) assertSameBook(binding, config);
+    throw error;
+  }
 }
 
 async function fetchResource(url, { fetchImpl, timeoutMs }, itemBase) {
@@ -103,15 +138,7 @@ export async function loadSession(sessionPath, { outputPath } = {}) {
 export async function prepareSession(config, { fetchImpl = globalThis.fetch, timeoutMs = 30000 } = {}) {
   if (typeof fetchImpl !== 'function' || !Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error('Invalid fetch or timeout');
   config = resolveHyreadConfig({ volume: config.volume, assetId: config.assetId, title: config.bookTitle, workDir: config.workDir, projectRoot: config.projectRoot, outputPath: config.outputPath });
-  let hasPrevious = false;
-  try {
-    await lstat(await safeJoin(config.workDir, 'session.json'));
-    hasPrevious = true;
-  } catch (error) { if (error.code !== 'ENOENT') throw error; }
-  if (hasPrevious) {
-    const previous = await loadSession(config.sessionPath);
-    if (previous.session.assetId !== config.assetId || previous.session.volume !== config.volume || previous.session.title !== config.bookTitle) throw new Error('Work directory belongs to another book');
-  }
+  await checkBookMetadata(config);
   const resourceRoot = `resources/generations/${randomUUID()}`;
   const generation = await safeJoin(config.workDir, resourceRoot);
   const itemPrefix = `${resourceRoot}/ebookservice/epub/${config.assetId}/item/`;
@@ -138,6 +165,8 @@ export async function prepareSession(config, { fetchImpl = globalThis.fetch, tim
     }));
     if (failure) throw failure;
     const session = validateSession({ schemaVersion: 1, volume: config.volume, assetId: config.assetId, title: config.bookTitle, sourceOpfSha256: sha256(opf), resourceRoot, resources, manifest, spine });
+    await bindBook(config);
+    await checkBookMetadata(config);
     await writeFileAtomic(await safeJoin(config.workDir, 'session.json'), JSON.stringify(session, null, 2) + '\n', { replace: true });
     return { config: generationConfig(config, session), session };
   } catch (error) {

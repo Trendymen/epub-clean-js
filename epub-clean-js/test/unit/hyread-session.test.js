@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as legacy from '../../hyread/config.mjs';
-import { createHyreadFixture } from '../helpers/hyread-fixtures.mjs';
+import { createHyreadFixture, startHyreadPrepareProcess } from '../helpers/hyread-fixtures.mjs';
 import * as sessionApi from '../../hyread/lib/session.mjs';
 import * as pathsApi from '../../hyread/lib/paths.mjs';
 
@@ -135,8 +135,11 @@ test('failed refresh preserves every old byte and prevents using a work director
   await assert.rejects(sessionApi.prepareSession(f.config, { fetchImpl: failingFetch }));
   assert.deepEqual(await readFile(f.config.sessionPath), sessionBytes);
   assert.deepEqual((await sessionApi.loadSession(f.config.sessionPath)).session, first.session);
-  const other = legacy.resolveHyreadConfig({ ...f.config, assetId: 'different-book' });
-  await assert.rejects(sessionApi.prepareSession(other, { fetchImpl: f.fetchImpl }));
+  const other = await createHyreadFixture({ workDir: f.config.workDir, assetId: 'different-book', title: '另一測試書' });
+  t.after(other.cleanup);
+  let requests = 0;
+  await assert.rejects(sessionApi.prepareSession(other.config, { fetchImpl: (...args) => { requests++; return other.fetchImpl(...args); } }), /belongs to another book/);
+  assert.equal(requests, 0);
   assert.deepEqual(await readFile(f.config.sessionPath), sessionBytes);
 });
 
@@ -180,16 +183,40 @@ test('prepare downloads at most four resources concurrently and refresh uses a n
   assert.deepEqual((await sessionApi.loadSession(f.config.sessionPath)).session, second.session);
 });
 
-test('prepare refuses to replace a session whose old resource is missing', async (t) => {
+test('same-book prepare repairs missing or tampered resources using a fresh generation', async (t) => {
+  const f = await fixture(t);
+  let previous = await sessionApi.prepareSession(f.config, { fetchImpl: f.fetchImpl });
+  for (const damage of ['missing', 'tampered']) {
+    const oldFile = join(previous.config.itemDir, 'style.css');
+    if (damage === 'missing') await rm(oldFile);
+    else await writeFile(oldFile, Buffer.from('modified old CSS'));
+    await assert.rejects(sessionApi.loadSession(previous.config.sessionPath));
+    const repaired = await sessionApi.prepareSession(f.config, { fetchImpl: f.fetchImpl });
+    assert.notEqual(repaired.session.resourceRoot, previous.session.resourceRoot);
+    assert.deepEqual((await sessionApi.loadSession(repaired.config.sessionPath)).session, repaired.session);
+    if (damage === 'missing') assert.equal(existsSync(oldFile), false);
+    else assert.equal(await readFile(oldFile, 'utf8'), 'modified old CSS');
+    previous = repaired;
+  }
+});
+
+test('failed same-book repair preserves the invalid old session and resource state', async (t) => {
   const f = await fixture(t);
   const { config } = await sessionApi.prepareSession(f.config, { fetchImpl: f.fetchImpl });
   const before = await readFile(config.sessionPath);
-  await rm(join(config.itemDir, 'style.css'));
-  await assert.rejects(sessionApi.prepareSession(f.config, { fetchImpl: f.fetchImpl }));
+  const oldFile = join(config.itemDir, 'style.css');
+  await writeFile(oldFile, 'damaged');
+  f.resources['xhtml/body2.xhtml'] = Buffer.from('new version');
+  await assert.rejects(sessionApi.prepareSession(f.config, { fetchImpl: async (url, options) => {
+    if (url.endsWith('/images/pixel.png')) throw new Error('repair download failed');
+    return f.fetchImpl(url, options);
+  } }), /repair download failed/);
   assert.deepEqual(await readFile(config.sessionPath), before);
+  assert.equal(await readFile(oldFile, 'utf8'), 'damaged');
+  await assert.rejects(sessionApi.loadSession(config.sessionPath), /integrity/);
 });
 
-test('load and prepare reject resource directory links outside the work directory', async (t) => {
+test('load rejects escaped resource links while a fresh generation can repair the same book', async (t) => {
   const f = await fixture(t);
   const { config } = await sessionApi.prepareSession(f.config, { fetchImpl: f.fetchImpl });
   const outside = join(f.config.projectRoot, 'external-images');
@@ -199,7 +226,86 @@ test('load and prepare reject resource directory links outside the work director
   try { await symlink(outside, join(config.itemDir, 'images'), process.platform === 'win32' ? 'junction' : 'dir'); }
   catch (error) { if (['EPERM', 'EACCES', 'ENOSYS'].includes(error.code)) { t.skip(`symlink unavailable: ${error.code}`); return; } throw error; }
   await assert.rejects(sessionApi.loadSession(config.sessionPath), /escapes/);
-  await assert.rejects(sessionApi.prepareSession(f.config, { fetchImpl: f.fetchImpl }), /escapes/);
+  const repaired = await sessionApi.prepareSession(f.config, { fetchImpl: f.fetchImpl });
+  assert.deepEqual((await sessionApi.loadSession(config.sessionPath)).session, repaired.session);
+  assert.deepEqual(await readFile(join(outside, 'pixel.png')), f.resources['images/pixel.png']);
+});
+
+test('validateSession rejects file ancestors even when a sibling separates sorted hrefs', async (t) => {
+  const f = await fixture(t);
+  const { session } = await sessionApi.prepareSession(f.config, { fetchImpl: f.fetchImpl });
+  session.manifest = ['a', 'a-b', 'a/b'].map((href, index) => ({ id: `item-${index}`, href, mediaType: 'text/plain', properties: [] }));
+  session.spine = [{ id: 'item-0', href: 'a' }];
+  session.resources = Object.fromEntries(['standard.opf', 'a', 'a-b', 'a/b'].map((href) => [href, { bytes: 1, sha256: session.sourceOpfSha256 }]));
+  assert.throws(() => sessionApi.validateSession(session), /collision/);
+});
+
+test('two processes cannot publish different books into one initially empty work directory', { timeout: 15000 }, async (t) => {
+  const f = await fixture(t);
+  const first = startHyreadPrepareProcess({ workDir: f.config.workDir, assetId: 'process-book-a', title: 'Book A' });
+  const second = startHyreadPrepareProcess({ workDir: f.config.workDir, assetId: 'process-book-b', title: 'Book B' });
+  t.after(first.kill);
+  t.after(second.kill);
+  await Promise.all([first.ready, second.ready]);
+  first.release();
+  const winner = await first.result;
+  assert.equal(winner.ok, true, winner.error);
+  second.release();
+  const loser = await second.result;
+  assert.equal(loser.ok, false, 'the second book must not replace the first binding');
+  assert.match(loser.error, /belongs to another book/);
+  assert.deepEqual((await sessionApi.loadSession(f.config.sessionPath)).session, winner.session);
+});
+
+test('a hanging response body times out, aborts and preserves the old published resources', async (t) => {
+  const f = await fixture(t);
+  const previous = await sessionApi.prepareSession(f.config, { fetchImpl: f.fetchImpl });
+  const before = await readFile(f.config.sessionPath);
+  let bodyStarted = false;
+  let bodySignal;
+  const fetchImpl = async (url, options) => {
+    if (!url.endsWith('/style.css')) return f.fetchImpl(url, options);
+    bodySignal = options.signal;
+    return {
+      url, status: 200,
+      arrayBuffer: () => new Promise((_, reject) => {
+        bodyStarted = true;
+        options.signal.addEventListener('abort', () => reject(new Error('body aborted')), { once: true });
+      }),
+    };
+  };
+  await assert.rejects(sessionApi.prepareSession(f.config, { fetchImpl, timeoutMs: 40 }), /timed out|body aborted/);
+  assert.equal(bodyStarted, true);
+  assert.equal(bodySignal.aborted, true);
+  assert.deepEqual(await readFile(f.config.sessionPath), before);
+  assert.deepEqual((await sessionApi.loadSession(f.config.sessionPath)).session, previous.session);
+});
+
+test('a process interrupted before session publication keeps its book binding and allows same-book retry', { timeout: 15000 }, async (t) => {
+  const f = await fixture(t);
+  const interrupted = startHyreadPrepareProcess({ workDir: f.config.workDir, assetId: f.config.assetId, title: f.config.bookTitle }, { pauseAt: 'session' });
+  t.after(interrupted.kill);
+  await interrupted.ready;
+  assert.equal(existsSync(f.config.sessionPath), false);
+  const other = await createHyreadFixture({ workDir: f.config.workDir, assetId: 'different-book', title: 'Other Book' });
+  t.after(other.cleanup);
+  await assert.rejects(sessionApi.prepareSession(other.config, { fetchImpl: other.fetchImpl }), /belongs to another book/);
+  interrupted.kill();
+  await interrupted.result;
+  const retry = await sessionApi.prepareSession(f.config, { fetchImpl: f.fetchImpl });
+  assert.deepEqual((await sessionApi.loadSession(f.config.sessionPath)).session, retry.session);
+});
+
+test('prepare rejects invalid persisted metadata without sending a resource request', async (t) => {
+  const f = await fixture(t);
+  await mkdir(f.config.workDir, { recursive: true });
+  for (const filename of ['session.json', 'book-identity.json']) {
+    await writeFile(join(f.config.workDir, filename), 'null');
+    let requests = 0;
+    await assert.rejects(sessionApi.prepareSession(f.config, { fetchImpl: (...args) => { requests++; return f.fetchImpl(...args); } }));
+    assert.equal(requests, 0);
+    await rm(join(f.config.workDir, filename));
+  }
 });
 
 test('safeJoin tolerates another resource writer creating the shared parent directory', async (t) => {

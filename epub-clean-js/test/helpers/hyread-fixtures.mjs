@@ -2,10 +2,12 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolveHyreadConfig } from '../../hyread/config.mjs';
+import { spawn } from 'node:child_process';
 
 export async function createHyreadFixture(options = {}) {
-  const temporary = await mkdtemp(join(tmpdir(), 'hyread-session-'));
-  const config = resolveHyreadConfig({ volume: '09', assetId: 'fixture-book-09', title: '合成測試書 9', workDir: join(temporary, 'work'), projectRoot: temporary, ...options });
+  const { temporaryParent = tmpdir(), ...configOptions } = options;
+  const temporary = await mkdtemp(join(temporaryParent, 'hyread-session-'));
+  const config = resolveHyreadConfig({ volume: '09', assetId: 'fixture-book-09', title: '合成測試書 9', workDir: join(temporary, 'work'), projectRoot: temporary, ...configOptions });
   const opf = Buffer.from(`<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata/><manifest>
     <item id="body2" href="xhtml/body2.xhtml" media-type="application/xhtml+xml"/>
     <item id="cover" href="xhtml/cover.xhtml" media-type="application/xhtml+xml"/>
@@ -36,4 +38,59 @@ export async function createHyreadFixture(options = {}) {
     return response;
   };
   return { config, opf, resources, capture: { order: ['xhtml/cover.xhtml', 'xhtml/body1.xhtml', 'xhtml/body2.xhtml'], data }, fetchImpl, cleanup: () => rm(temporary, { recursive: true, force: true }) };
+}
+
+export function startHyreadPrepareProcess(options, { pauseAt = 'first' } = {}) {
+  const script = `
+    import fs from 'node:fs';
+    import { dirname } from 'node:path';
+    import { syncBuiltinESMExports } from 'node:module';
+    import { createHyreadFixture } from ${JSON.stringify(import.meta.url)};
+    import { prepareSession } from ${JSON.stringify(new URL('../../hyread/lib/session.mjs', import.meta.url).href)};
+    const f = await createHyreadFixture({ ...${JSON.stringify(options)}, temporaryParent: dirname(${JSON.stringify(options.workDir)}) });
+    let gated = false;
+    for (const method of ['link', 'rename']) {
+      const original = fs.promises[method];
+      fs.promises[method] = async (...args) => {
+        if (!gated && dirname(args[1]) === f.config.workDir && (${JSON.stringify(pauseAt)} !== 'session' || method === 'rename')) {
+          gated = true;
+          process.send({ type: 'ready' });
+          await new Promise((resolve) => process.once('message', resolve));
+        }
+        return original(...args);
+      };
+    }
+    syncBuiltinESMExports();
+    try {
+      const result = await prepareSession(f.config, { fetchImpl: f.fetchImpl });
+      process.send({ type: 'result', ok: true, session: result.session });
+    } catch (error) {
+      process.send({ type: 'result', ok: false, error: error.message });
+    } finally {
+      await f.cleanup();
+      process.disconnect();
+    }
+  `;
+  const child = spawn(process.execPath, ['--input-type=module', '--eval', script], {
+    cwd: process.cwd(), stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+  });
+  let errors = '';
+  child.stderr.setEncoding('utf8').on('data', (chunk) => { errors += chunk; });
+  let resolveReady, rejectReady, resolveResult;
+  const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
+  const result = new Promise((resolve) => { resolveResult = resolve; });
+  child.on('message', (message) => {
+    if (message.type === 'ready') resolveReady();
+    if (message.type === 'result') {
+      resolveResult(message);
+      if (!message.ok) rejectReady(new Error(message.error));
+    }
+  });
+  child.on('error', (error) => { rejectReady(error); resolveResult({ ok: false, error: error.message }); });
+  child.on('exit', (code) => {
+    const error = `Prepare child exited ${code}: ${errors}`;
+    rejectReady(new Error(error));
+    resolveResult({ ok: false, error });
+  });
+  return { ready, result, release: () => child.send({ type: 'release' }), kill: () => child.kill() };
 }
