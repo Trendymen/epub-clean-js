@@ -32,3 +32,26 @@ export const EPUB_BUILD = join(WORK, 'epub_build'); // 步骤 4b EPUB 组装目�
 export const PROJECT_ROOT = resolve(HYREAD_DIR, '..', '..'); // = 义妹生活/（epub-clean-js 的上一级）
 export const OUTPUT_DIR = join(PROJECT_ROOT, 'output', 'hyread');
 export const OUTPUT_EPUB = join(OUTPUT_DIR, `[三河ごーすと].义妹生活.${VOLUME}.[台繁].hyread.epub`);
+
+export function resolveHyreadConfig(options = {}) {
+  const volume = String(options.volume ?? VOLUME);
+  if (!/^\d+$/.test(volume) || !Number.isSafeInteger(Number(volume)) || Number(volume) < 1) {
+    throw new Error('volume must be a positive integer');
+  }
+  const normalizedVolume = String(Number(volume)).padStart(2, '0');
+  const assetId = options.assetId ?? ASSET_ID;
+  const title = options.title ?? BOOK_TITLE;
+  if (typeof assetId !== 'string' || !/^[A-Za-z0-9_-]+$/.test(assetId)) throw new Error('Invalid assetId');
+  if (typeof title !== 'string' || !title.trim() || /[\u0000-\u001f\u007f]/.test(title)) throw new Error('Invalid title');
+  const projectRoot = resolve(options.projectRoot ?? PROJECT_ROOT);
+  const workDir = resolve(options.workDir ?? join(HYREAD_DIR, 'work', normalizedVolume));
+  const epubBase = `${SERVICE}/ebookservice/epub/${assetId}/`;
+  return {
+    volume: normalizedVolume, assetId, bookTitle: title, projectRoot, workDir,
+    itemBase: `${epubBase}item/`,
+    resourcesDir: join(workDir, 'resources'), itemDir: join(workDir, 'resources', 'ebookservice', 'epub', assetId, 'item'),
+    sessionPath: join(workDir, 'session.json'), capturePath: join(workDir, 'grab_xml.json'),
+    auditPath: join(workDir, 'audit.json'), buildDir: join(workDir, 'epub_build'),
+    outputPath: resolve(options.outputPath ?? join(projectRoot, 'output', 'hyread', `[三河ごーすと].义妹生活.${normalizedVolume}.[台繁].hyread.epub`)),
+  };
+}
