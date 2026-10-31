@@ -206,7 +206,7 @@
       return { tag: node.tagName.toLowerCase(), src: resourceUrl(node.getAttribute('src') || node.getAttribute('href') || node.getAttribute('xlink:href'), value.src), alt: node.getAttribute('alt') || '', paragraphIndex: blocks.findIndex((block) => block.contains(node)), width: Number(node.width?.baseVal?.value ?? node.width ?? bounds.width), height: Number(node.height?.baseVal?.value ?? node.height ?? bounds.height), complete: typeof node.complete === 'boolean' ? node.complete : null, naturalWidth: typeof node.naturalWidth === 'number' ? node.naturalWidth : null };
     });
     return { src: value.src, spineId: value.item.spineId, spineIndex: value.item.spineIndex, bodyText: text(value.doc.body.textContent), paragraphs, images,
-      ruby: Array.from(value.doc.body.querySelectorAll('ruby'), (node) => ({ text: text(node.textContent), html: node.outerHTML })),
+      ruby: Array.from(value.doc.body.querySelectorAll('ruby'), (node) => text(node.textContent)),
       bodyLinks: Array.from(value.doc.body.querySelectorAll('a[href]'), (node) => ({ text: text(node.textContent), href: node.getAttribute('href') })),
       pageCount: value.pageCount, pageChecks: [], bodyChanges: [], unseenTextBlocks: [], errors: [] };
   }

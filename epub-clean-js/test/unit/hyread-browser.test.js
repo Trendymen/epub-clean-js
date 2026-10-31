@@ -42,6 +42,8 @@ test('audit follows duplicate TOC entries and checks every page and directory-fr
   assert.equal(first.paragraphs[0].tag, 'p');
   assert.match(first.paragraphs[0].semantic, /^前😀\[image:.*pixel.png\]後/);
   assert.equal(first.images[0].paragraphIndex, 0);
+  assert.ok(first.ruby.every((entry) => typeof entry === 'string'));
+  assert.deepEqual(first.ruby, ['字音']);
   assert.deepEqual(first.bodyLinks, [{ text: '回上段', href: '#first' }]);
   assert.ok(first.unseenTextBlocks.includes(2));
   assert.equal(value.imageHashes.length, 1);
