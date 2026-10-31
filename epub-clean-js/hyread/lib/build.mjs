@@ -144,8 +144,8 @@ function inspectDependencies(name, text, entries, issues) {
   const styles = name.endsWith('.css') ? [text] : [];
   const references = new Set();
   const check = (value, hyperlink = false) => {
-    if (value) references.add(value);
     if (!value || value.startsWith('data:') || (hyperlink && /^(?:https?:|mailto:|tel:)/i.test(value))) return;
+    references.add(value);
     try {
       const target = resolveReference(value, name);
       if (!entries[target.path]) issues.push(`${name}: missing dependency ${value}`);

@@ -380,3 +380,22 @@ test('B5: encoded CSS separators keep equivalent commented missing target in val
   assert.ok(result.issues.some((issue) => /missing dependency dir%2Fmissing.css/.test(issue)));
   assert.deepEqual(result.ignoredNonElementReferences, []);
 });
+
+for (const [label, allowed] of [
+  ['https hyperlink', '<a href="https://example.invalid/author">作者</a>'],
+  ['http hyperlink', '<a href="http://example.invalid/author">作者</a>'],
+  ['mailto hyperlink', '<a href="mailto:author@example.invalid">作者</a>'],
+  ['tel hyperlink', '<a href="tel:+123456789">作者</a>'],
+  ['data CSS URL', '<p style="background-image:url(data:image/png;base64,AA==)">資料</p>'],
+]) test(`R1: allowed ${label} does not turn an unrelated commented link into a build dependency`, async (t) => {
+  const f = await fixture(t), src = f.capture.order[1];
+  const inert = '<!-- <link href="missing.css"/> -->';
+  f.capture.data[src] = f.capture.data[src].replace('</head>', `${inert}</head>`).replace('</body>', `${allowed}</body>`);
+  await writeFile(f.config.capturePath, JSON.stringify(f.capture));
+  const built = await buildHyreadEpub(f.config), { entries } = await readEpub(built.outputPath);
+  assert.equal(built.report.ok, true);
+  assert.equal(built.report.rawTextEqual, true);
+  assert.ok(entries['item/xhtml/body1.xhtml'].toString().includes(allowed));
+  assert.ok(entries['item/xhtml/body1.xhtml'].toString().includes(inert));
+  assert.deepEqual(built.report.ignoredNonElementReferences.map(({ file, reference, regionType }) => ({ file, reference, regionType })), [{ file: 'item/xhtml/body1.xhtml', reference: 'missing.css', regionType: 'comment' }]);
+});
