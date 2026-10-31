@@ -198,31 +198,50 @@ function findAnchors(document) {
   return out;
 }
 
+function footnoteScope(target, targets) {
+  if (!target) return null;
+  const containingLi = target.closest('li');
+  const aside = target.closest('aside');
+  if (containingLi) return containingLi;
+  if (aside && !targets.some((other) => other !== target && aside.contains(other))) return aside;
+  return target;
+}
+
 /**
  * 抽取锚点对应的脚注正文（按 href #id 找配对的 aside / li / section / note 元素）。
  * @param {Element} anchor
  * @param {Document} document
- * @returns {{ text: string, bodyHtml: string|null }}
+ * @returns {{ text: string, bodyHtml: string|null, scope?: Element }}
  */
-function extractBody(anchor, document) {
+function extractBody(anchor, document, scope, references, targetIds) {
   const href = anchor.getAttribute('href') || '';
   if (!href.startsWith('#')) return { text: '', bodyHtml: null };
   const targetId = href.slice(1);
   const target = document.getElementById(targetId);
   if (!target) return { text: '', bodyHtml: null };
 
-  const container = target.closest('aside') || target;
-  const source = container.querySelector('li') || container;
+  let source = scope;
+  let content = scope;
+  const wrapper = scope.firstElementChild;
+  if (scope.tagName === 'ASIDE' && scope.children.length === 1 && wrapper.tagName === 'A'
+    && references.has(wrapper.getAttribute('href'))
+    && [...scope.childNodes].every((node) => node === wrapper || !node.textContent.trim())) content = wrapper;
+  const list = content.firstElementChild;
+  if (scope.tagName === 'ASIDE' && content.children.length === 1 && list.tagName === 'OL'
+    && list.children.length === 1 && list.firstElementChild.tagName === 'LI'
+    && [...content.childNodes].every((node) => node === list || !node.textContent.trim())) {
+    source = list.firstElementChild;
+  }
   const body = document.createElement('div');
   body.innerHTML = source.tagName === 'P' ? source.outerHTML : source.innerHTML;
   for (const node of body.querySelectorAll('[id]')) {
-    if (node.id === targetId) node.removeAttribute('id');
+    if (targetIds.has(node.id)) node.removeAttribute('id');
   }
   const textNodes = (node) => node.nodeType === 3 ? [node]
     : [...node.childNodes].flatMap(textNodes);
   const firstText = textNodes(body).find((node) => node.textContent.trim());
   const backlink = firstText?.parentElement?.closest('a');
-  const hasBacklink = backlink?.getAttribute('href') === `#${anchor.id}`
+  const hasBacklink = references.has(backlink?.getAttribute('href'))
     && /^注\d*\s*[:：]?$/.test(backlink.textContent.trim());
   if (hasBacklink) backlink.remove();
   const prefix = (hasBacklink || !backlink)
@@ -245,9 +264,9 @@ function extractBody(anchor, document) {
     return [...node.childNodes].map(plainText).join('') + (node.tagName === 'P' ? '\n' : '');
   };
   const text = plainText(body).trim();
-  const preserveHtml = body.querySelector('ruby') || body.querySelectorAll('p').length > 1;
+  const preserveHtml = body.querySelector('ruby, [id], a[href]') || body.querySelectorAll('p').length > 1;
   const html = body.innerHTML.trim();
-  return { text, bodyHtml: preserveHtml ? (body.querySelector('p') ? html : `<p>${html}</p>`) : null };
+  return { text, bodyHtml: preserveHtml ? (body.querySelector('p') ? html : `<p>${html}</p>`) : null, scope };
 }
 
 /**
@@ -287,22 +306,47 @@ export function upgradeFootnotes(xhtml, opts = {}) {
   if (anchors.length === 0) return xhtml;
 
   // pre-pass 收集所有 anchor + body（避免遍历过程中 DOM 变化导致 querySelector 失效）
-  const items = anchors.map((anchor) => ({
-    anchor,
-    target: document.getElementById(anchor.getAttribute('href').slice(1)),
-    ...extractBody(anchor, document),
-  }));
+  const targets = anchors.map((anchor) => document.getElementById(anchor.getAttribute('href').slice(1))).filter(Boolean);
+  const items = anchors.map((anchor) => {
+    const target = document.getElementById(anchor.getAttribute('href').slice(1));
+    return { anchor, target, scope: footnoteScope(target, targets) };
+  });
+  const groups = new Map();
+  const owners = [];
+  for (const item of items) {
+    const existing = item.scope && groups.get(item.scope);
+    item.owner = existing || item;
+    if (!existing) {
+      item.members = [];
+      owners.push(item);
+      if (item.scope) groups.set(item.scope, item);
+    }
+    item.owner.members.push(item);
+  }
 
-  // 删除原 aside 块（避免新旧并存）
-  for (const a of [...document.querySelectorAll('aside')]) a.remove();
-  for (const { target } of items) {
-    if (target && !target.closest('aside')) target.remove();
+  for (const item of owners) {
+    const references = new Set(item.members.map(({ anchor }) => anchor.id && `#${anchor.id}`).filter(Boolean));
+    const targetIds = new Set(item.members.map(({ target }) => target?.id).filter(Boolean));
+    Object.assign(item, extractBody(item.anchor, document, item.scope, references, targetIds));
+    item.removedIds = new Set([...targetIds, item.scope?.id].filter(Boolean));
+  }
+  for (const item of owners) {
+    if (!item.scope) continue;
+    let parent = item.scope.parentElement;
+    item.scope.remove();
+    while (parent && ['OL', 'ASIDE'].includes(parent.tagName)
+      && parent.children.length === 0 && !parent.textContent.trim()) {
+      if (parent.id) item.removedIds.add(parent.id);
+      const next = parent.parentElement;
+      parent.remove();
+      parent = next;
+    }
   }
 
   const retainedIds = new Set([...document.querySelectorAll('[id]')]
     .filter((node) => !anchors.some((anchor) => anchor === node || anchor.contains(node)))
     .map((node) => node.id));
-  for (const item of items) {
+  for (const item of owners) {
     if (item.bodyHtml === null) continue;
     const body = document.createElement('div');
     body.innerHTML = item.bodyHtml;
@@ -317,9 +361,11 @@ export function upgradeFootnotes(xhtml, opts = {}) {
     item.number = nextNumber++;
     const padded = String(item.number).padStart(3, '0');
     if (item.anchor.id) movedIds.set(item.anchor.id, `note_ref${padded}`);
-    if (item.target?.id && !retainedIds.has(item.target.id)) movedIds.set(item.target.id, `note${padded}`);
-    const containerId = item.target?.closest('aside')?.id;
-    if (containerId && !retainedIds.has(containerId)) movedIds.set(containerId, `note${padded}`);
+    if (item.owner === item) {
+      for (const id of item.removedIds) {
+        if (!retainedIds.has(id)) movedIds.set(id, `note${padded}`);
+      }
+    }
   }
   const remapLinks = (root) => {
     for (const link of root.querySelectorAll('a[href^="#"]')) {
@@ -328,7 +374,7 @@ export function upgradeFootnotes(xhtml, opts = {}) {
     }
   };
   remapLinks(document);
-  for (const item of items) {
+  for (const item of owners) {
     if (!item.body) continue;
     remapLinks(item.body);
     item.bodyHtml = item.body.innerHTML;
@@ -336,9 +382,12 @@ export function upgradeFootnotes(xhtml, opts = {}) {
 
   const asides = [];
   for (let i = 0; i < items.length; i++) {
-    const { anchor, text, bodyHtml, number } = items[i];
+    const { anchor, owner, number } = items[i];
+    const { text, bodyHtml } = owner;
     const imgFilename = pickIcon(text, opts);
-    const [refHtml, plainAsideHtml] = buildSteraFootnote({ text, imgFilename }, number, opts);
+    const [generatedRef, plainAsideHtml] = buildSteraFootnote({ text, imgFilename }, number, opts);
+    const refHtml = generatedRef.replace(`href="#note${String(number).padStart(3, '0')}"`,
+      `href="#note${String(owner.number).padStart(3, '0')}"`);
     const asideHtml = bodyHtml === null ? plainAsideHtml
       : plainAsideHtml.replace(/<p>[\s\S]*?<\/p>/, () => bodyHtml);
 
@@ -358,7 +407,7 @@ export function upgradeFootnotes(xhtml, opts = {}) {
     const newRefNode = wrapper.firstElementChild;
     if (newRefNode) replaceTarget.replaceWith(newRefNode);
 
-    asides.push(asideHtml);
+    if (owner === items[i]) asides.push(asideHtml);
   }
 
   // 追加所有 aside 到 body 末尾
