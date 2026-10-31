@@ -84,24 +84,71 @@ const RARE_CHAR_IMAGE_MAP = {
   'p000.png': '﨑', // 﨑：13 卷后记声优「天﨑滉平」名字用字
 };
 
-// 重建含行内代用字图的段落文本：文本节点取文，<img> 取映射真字符（无映射则略过），<br> 忽略。
-function buildInlineText(pEl) {
-  let out = '';
+function inlinePlainText(node) {
+  if (node.nodeType === 3) return node.textContent || '';
+  const tag = (node.localName || '').toLowerCase();
+  if (tag === 'rt' || tag === 'rp' || tag === 'br') return '';
+  if (tag === 'img') {
+    const base = path.posix.basename((node.getAttribute('src') || '').split('?')[0]);
+    return RARE_CHAR_IMAGE_MAP[base] || '';
+  }
+  return Array.from(node.childNodes || []).map(inlinePlainText).join('');
+}
+
+function normalizeInlineText(text) {
+  return simplifyText(text).replace(/[ \t\r\n\u00a0]+/g, ' ');
+}
+
+// rubySpans 使用简化后 text 的 UTF-16 偏移；空数组也表示正文已按源结构解析，不用字符串回退。
+function buildInlineBlock(pEl) {
+  let text = '';
+  const rubySpans = [];
+  const append = (value) => {
+    let part = normalizeInlineText(value);
+    if (text.endsWith(' ') && part.startsWith(' ')) part = part.slice(1);
+    text += part;
+  };
   const walk = (node) => {
     for (const c of node.childNodes) {
-      if (c.nodeType === 3) { out += c.textContent || ''; continue; }
+      if (c.nodeType === 3) { append(c.textContent || ''); continue; }
       if (c.nodeType !== 1) continue;
       const tag = (c.localName || c.tagName || '').toLowerCase();
-      if (tag === 'img') {
-        const base = path.posix.basename((c.getAttribute('src') || '').split('?')[0]);
-        out += RARE_CHAR_IMAGE_MAP[base] || '';
-      } else if (tag !== 'br') {
+      if (tag === 'ruby') {
+        const base = normalizeInlineText(inlinePlainText(c));
+        const rt = Array.from(c.querySelectorAll('rt'))
+          .map((el) => normalizeInlineText(el.textContent || '').trim()).join(' ');
+        const start = text.length;
+        text += base;
+        if (base && rt) rubySpans.push({ start, end: text.length, base, rt });
+      } else if (tag === 'img') {
+        append(inlinePlainText(c));
+      } else if (tag !== 'br' && tag !== 'rt' && tag !== 'rp') {
         walk(c);
       }
     }
   };
   walk(pEl);
-  return out;
+  const leading = text.length - text.trimStart().length;
+  text = text.trim();
+  return {
+    type: 'text', text, bold: false,
+    rubySpans: rubySpans.map((span) => {
+      const start = Math.max(0, span.start - leading);
+      const end = Math.min(text.length, span.end - leading);
+      return { start, end, base: text.slice(start, end), rt: span.rt };
+    }).filter((span) => span.end > span.start),
+  };
+}
+
+function isStandaloneHeading(element, blocks) {
+  if (blocks.some((block) => block.type === 'text')) return false;
+  const text = inlinePlainText(element).replace(/\s+/g, '');
+  if (!text) return false;
+  return [element, ...element.querySelectorAll('[class]')].some((node) => {
+    const tokens = (node.getAttribute('class') || '').split(/\s+/);
+    return tokens.some((token) => token === 'font-1em40' || token === 'gfont40')
+      && inlinePlainText(node).replace(/\s+/g, '') === text;
+  });
 }
 
 function parseChapterXhtml(xhtml) {
@@ -124,16 +171,15 @@ function parseChapterXhtml(xhtml) {
       const cls = child.getAttribute('class') || '';
 
       // 跳过仅含 mfont class 的空/标记段
-      if (/\bmfont\b/.test(cls) && !BODY_P_CSS_RE.test(cls)) continue;
+      if (/\bmfont\b/.test(cls) && !BODY_P_CSS_RE.test(cls) && !isStandaloneHeading(child, blocks)) continue;
 
       // 跳过 spacer
       const text = (child.textContent || '').trim();
       if (/^[　\s]*$/.test(text) && child.querySelector('br')) continue;
 
-      // 章节标题大字（gfont font-1em40）：单独抽出当标题，不进正文 blocks（避免与 h3 重复）。
-      // 结构识别比文本匹配可靠——台繁 TOC 标题与正文标题措辞可能不同（如「与」vs「和」）。
-      if (headingText === null && /font-1em40/.test(html)) {
-        const ht = (child.textContent || '').replace(/\s+/g, '');
+      // 只抽出正文开始前、整段由标题样式包裹的节点。
+      if (headingText === null && isStandaloneHeading(child, blocks)) {
+        const ht = inlinePlainText(child).replace(/\s+/g, '');
         if (ht) { headingText = ht; continue; }
       }
 
@@ -145,8 +191,8 @@ function parseChapterXhtml(xhtml) {
         // 行内代用字图（生僻字做成 1em 小图嵌在文字里）：还原整段文字 + 真字符，不抽成块图。
         const isInlineGlyph = /\bheight-1em\b/.test(imgCls) || Object.prototype.hasOwnProperty.call(RARE_CHAR_IMAGE_MAP, base);
         if (isInlineGlyph) {
-          const inlineText = buildInlineText(child).replace(/\s+/g, '');
-          if (inlineText) blocks.push({ type: 'text', text: inlineText, bold: false });
+          const block = buildInlineBlock(child);
+          if (block.text) blocks.push(block);
           continue;
         }
         // 整页插图
@@ -165,10 +211,8 @@ function parseChapterXhtml(xhtml) {
 
       // 正文段落
       if (BODY_P_CSS_RE.test(cls) || BODY_P_CSS_RE.test(html)) {
-        const rawText = (child.textContent || '').replace(/\s+/g, '');
-        if (rawText) {
-          blocks.push({ type: 'text', text: rawText, bold: false });
-        }
+        const block = buildInlineBlock(child);
+        if (block.text) blocks.push(block);
         continue;
       }
     }
@@ -218,14 +262,13 @@ function parseAnotherDaysChapterXhtml(xhtml) {
 
       const cls = child.getAttribute('class') || '';
       // mfont 段是标记/空段（如 font-1em10 小字标记），readmoo 正文段是 moofs*/moolh*
-      if (/\bmfont\b/.test(cls) && !/font-1em40/.test(html)) continue;
+      if (/\bmfont\b/.test(cls) && !isStandaloneHeading(child, blocks)) continue;
 
       const text = (child.textContent || '').trim();
       if (/^[　\s]*$/.test(text) && child.querySelector('br')) continue;
 
-      // 大字标题（gfont font-1em40）抽作 headingText
-      if (headingText === null && /font-1em40/.test(html)) {
-        const ht = (child.textContent || '').replace(/\s+/g, '');
+      if (headingText === null && isStandaloneHeading(child, blocks)) {
+        const ht = inlinePlainText(child).replace(/\s+/g, '');
         if (ht) { headingText = ht; continue; }
       }
 
@@ -237,8 +280,8 @@ function parseAnotherDaysChapterXhtml(xhtml) {
         const isInlineGlyph = /\bheight-1em\b/.test(imgCls)
           || Object.prototype.hasOwnProperty.call(RARE_CHAR_IMAGE_MAP, base);
         if (isInlineGlyph) {
-          const inlineText = buildInlineText(child).replace(/\s+/g, '');
-          if (inlineText) blocks.push({ type: 'text', text: inlineText, bold: false });
+          const block = buildInlineBlock(child);
+          if (block.text) blocks.push(block);
           continue;
         }
         if (base) {
@@ -249,8 +292,8 @@ function parseAnotherDaysChapterXhtml(xhtml) {
       }
 
       // 正文段：有文字即取（readmoo 无 __reader-* 类，靠排除标记段后的有文字 p）
-      const rawText = (child.textContent || '').replace(/\s+/g, '');
-      if (rawText) blocks.push({ type: 'text', text: rawText, bold: false });
+      const block = buildInlineBlock(child);
+      if (block.text) blocks.push(block);
       continue;
     }
 
@@ -386,9 +429,6 @@ export async function parseHyreadEpubToBook(sourceEpubPath, { volume, creditOver
   for (const chPath of chapterFiles) {
     const fileName = chPath.split('/').pop(); // "p-001.xhtml"
     const { blocks, headingText } = parseChapterXhtml(read(chPath));
-    for (const b of blocks) {
-      if (b.type === 'text') b.text = simplifyText(b.text);
-    }
     fileBlocks.push({ fileName, blocks, headingText: headingText ? simplifyText(headingText) : null });
   }
 
@@ -613,9 +653,6 @@ export async function parseAnotherDaysEpubToBook(sourceEpubPath, { volume = 'ano
     if (chapterRe.test(name)) {
       seenAnyChapter = true;
       const { blocks, headingText } = parseAnotherDaysChapterXhtml(read(`${R}/xhtml/${name}`));
-      for (const b of blocks) {
-        if (b.type === 'text') b.text = simplifyText(b.text);
-      }
       // 头部插入配对彩插
       const allBlocks = [...pendingFmatterBlocks, ...blocks];
       pendingFmatterBlocks = [];

@@ -209,18 +209,29 @@ function collectNoteEvents(text, fixedFootnotes = []) {
 
 // 把单个段落文本里的台版内联注释与固定迁移注释替换成 duokan-footnote 引用锚点，
 // 注释正文累积到 state.asides，编号由 state.counter 递增（每章重置）。
-function renderParagraphWithNotes(text, state, fixedFootnotes = []) {
-  if (!state) return escapeXml(text);
-  const renderText = (segment) => renderRubyAnnotations(segment, state.rubyAnnotations || []);
+function renderParagraphWithNotes(text, state, fixedFootnotes = [], rubySpans = null) {
+  const renderText = (start, end) => {
+    if (!rubySpans) return renderRubyAnnotations(text.slice(start, end), state?.rubyAnnotations || []);
+    let html = '';
+    let cursor = start;
+    for (const span of rubySpans) {
+      if (span.start < start || span.end > end) continue;
+      html += escapeXml(text.slice(cursor, span.start));
+      html += `<ruby>${escapeXml(span.base)}<rt>${escapeXml(span.rt)}</rt></ruby>`;
+      cursor = span.end;
+    }
+    return html + escapeXml(text.slice(cursor, end));
+  };
+  if (!state) return renderText(0, text.length);
   let html = '';
   let lastIndex = 0;
   for (const event of collectNoteEvents(text, fixedFootnotes)) {
     if (event.start < lastIndex) continue;
-    html += renderText(text.slice(lastIndex, event.start));
+    html += renderText(lastIndex, event.start);
     html += buildRenderedFootnote(event.body, state);
     lastIndex = event.end;
   }
-  html += renderText(text.slice(lastIndex));
+  html += renderText(lastIndex, text.length);
   return html;
 }
 
@@ -258,10 +269,10 @@ function renderBlocks(blocks, state = null) {
       lines.push(renderImageDiv(block));
       continue;
     }
-    const text = normalizeText(block.text);
+    const text = block.rubySpans ? block.text : normalizeText(block.text);
     if (!text || isSeparator(text)) continue;
     const fixedFootnotes = state?.fixedFootnotesByPara?.get(paraIdx) ?? [];
-    lines.push(` <p>${renderParagraphWithNotes(text, state, fixedFootnotes)}</p>`);
+    lines.push(` <p>${renderParagraphWithNotes(text, state, fixedFootnotes, block.rubySpans)}</p>`);
     paraIdx += 1;
   }
   return lines.join('\n');
@@ -364,13 +375,16 @@ ${logo}
 }
 
 function renderPreXhtml(book) {
+  const state = { counter: 1, asides: [], rubyAnnotations: [] };
   const text = book.preBlocks
     .filter((block) => block.type === 'text')
-    .map((block) => normalizeText(block.text))
+    .map((block) => renderParagraphWithNotes(
+      block.rubySpans ? block.text : normalizeText(block.text), state, [], block.rubySpans,
+    ))
     .filter(Boolean)
     .join('');
   const blankLines = Array.from({ length: 5 }, () => ' <p><br/></p>').join('\n');
-  return xhtml('', `${blankLines}\n <p><b>${escapeXml(text)}</b></p>`);
+  return xhtml('', `${blankLines}\n <p><b>${text}</b></p>\n${state.asides.join('')}`);
 }
 
 function flattenTocEntries(entries) {

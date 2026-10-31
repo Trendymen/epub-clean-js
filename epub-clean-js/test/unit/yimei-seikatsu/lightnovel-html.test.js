@@ -16,6 +16,46 @@ import {
 } from '../../../books/yimei-seikatsu/lightnovel-html/index.js';
 import { rubyAnnotationsForVolume } from '../../../src/entries/lightnovel-html-simple-batch.js';
 import { readEpub, writeEpub } from '../../../src/core/zip-io.js';
+import { parseHyreadEpubToBook } from '../../../books/yimei-seikatsu/hyread-parser.js';
+import { writeHyreadFixture, bodyParagraph as hyreadP } from '../../helpers/hyread-fixture.js';
+
+test('HyRead renders native ruby in chapters, preface and afterword without annotating ordinary matches', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-hyread-inline-'));
+  try {
+    const source = join(dir, 'source.epub');
+    const ref = join(dir, 'ref.epub');
+    const out = join(dir, 'out.epub');
+    await writeHyreadFixture(source, { pages: {
+      'p-001.xhtml': hyreadP('題記<ruby>愛情<rt>Love &amp; Peace</rt></ruby>（註：前言註解）'),
+      'p-002.xhtml': '<p class="__reader-paragraph-spacing__"><span class="gfont40">第一章</span></p>'
+        + hyreadP('  淺村Asamura（註：前註）<ruby><rb><span>淺村</span></rb><rp>（</rp><rt>Asamura</rt><rp>）</rp></ruby><ruby>A &amp; B<rt>C &lt; D &amp; E</rt></ruby><ruby>A &amp; B<rt>C &lt; D &amp; E</rt></ruby>（註：後註） 淺村Asamura  ')
+        + hyreadP('大山千春OoyamaChiharu與水星我們學校'),
+      'p-003.xhtml': '<p class="gfont40">後記</p>' + hyreadP('<ruby>感謝<rt>Thank You</rt></ruby>。'),
+    } });
+    await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
+    const book = await parseHyreadEpubToBook(source, { volume: '13' });
+    await buildLightNovelEpubFromBook(book, { sourceImages: book._sourceImages, refEpubPath: ref, outEpubPath: out, includeSpecials: false });
+    const epub = await readEpub(out);
+    const chapter = epub.entries['OEBPS/Text/chapter0001.xhtml'].toString('utf8');
+    assert.equal((chapter.match(/<h3>第一章<\/h3>/g) || []).length, 1);
+    assert.doesNotMatch(chapter, /<p>第一章<\/p>/);
+    assert.equal((chapter.match(/<ruby>浅村<rt>Asamura<\/rt><\/ruby>/g) || []).length, 1);
+    assert.equal((chapter.match(/<ruby>A &amp; B<rt>C &lt; D &amp; E<\/rt><\/ruby>/g) || []).length, 2);
+    assert.match(chapter, /<p>浅村Asamura<sub><a\b[^>]*>[\s\S]*?<\/a><\/sub><ruby>浅村/);
+    assert.match(chapter, /<\/ruby><sub><a\b[^>]*>[\s\S]*?<\/a><\/sub> 浅村Asamura<\/p>/);
+    assert.match(chapter, /大山千春OoyamaChiharu与水星我们学校/);
+    assert.match(chapter, /前注/);
+    assert.match(chapter, /后注/);
+    assert.doesNotMatch(chapter, /<rp>|Asamura（|Asamura）/);
+    const pre = epub.entries['OEBPS/Text/pre.xhtml'].toString('utf8');
+    assert.match(pre, /题记<ruby>爱情<rt>Love &amp; Peace<\/rt><\/ruby><sub><a\b/);
+    assert.match(pre, /前言注解/);
+    const afterword = epub.entries['OEBPS/Text/chapter0002.xhtml'].toString('utf8');
+    assert.match(afterword, /<ruby>感谢<rt>Thank You<\/rt><\/ruby>/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
 
 const SAMPLE_HTML = `<!doctype html>
 <html><body>
