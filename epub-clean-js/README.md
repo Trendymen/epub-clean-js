@@ -1,8 +1,8 @@
 # epub-clean-js
 
-义妹生活 EPUB 处理工具集。Node ESM 实现。本工程合并自 Python `scripts/` + Node 半成品 `yimei-epub-migrate/` + 11-15 卷反混淆原型，是该项目的**唯一最终工程**。
+义妹生活 EPUB 处理工具集，使用 Node ESM，要求 Node >=18。本工程由原 Python `scripts/`、Node `yimei-epub-migrate/` 和 11-15 卷反混淆原型合并而来，后续修改在此维护。
 
-**状态**：✅ Phase 1-3 全部完成（97/97 全测 PASS，09 卷与 Python 基线 byte-level 一致）。
+09 卷迁移保留 normalized golden 基线。当前测试结果以本次运行输出为准；完整套件还依赖外部 EPUB、字体和 HyRead 工作数据，历史 97/97 不是当前全套结果。
 
 ## 子命令
 
@@ -14,8 +14,44 @@
 | `all`    | strip + heal + align 串跑 | 11-15 卷 |
 | `migrate-translation` | 把台版译文迁移到日翻 epub 容器，套用 07 卷 STERA 排版骨架 | 09 卷（绑义妹生活）|
 | `footnote-fix` | 把任意 epub 的注释升级到 09 台简 V8 多端兼容风格 | **通用**（不绑书）|
+| `prepare-fonts` | 校验并准备固定版本的 Adobe 思源字体与许可证 | 使用字体子集的转换流程 |
+| `build-yimei-simple` | 按指定数字卷批量生成普通版与附特典版 | 义妹生活 HTML / HyRead 源 |
+| `hyread-to-simple` | 指定单卷 HyRead EPUB 转台简 | 数字卷自动选素材；短篇合集使用显式路径 |
 
 ## 用法
+
+### 字体准备与台简构建
+
+在包目录 `epub-clean-js/` 中执行：
+
+```bash
+npm run prepare:fonts
+npm run build:yimei-simple -- --volumes 14
+npm run build:yimei-simple -- --volumes 14,15 --root /path/to/books --out-dir /path/to/products
+```
+
+字体准备从 Adobe 官方仓库的固定 tag 下载思源黑体 `2.004R` 和思源宋体 `2.003R`，逐份校验文件长度与 SHA-256，并把字体和 `LICENSE.txt` 写入 `books/source-han-sans-sc/`、`books/source-han-serif-sc/`。来源、固定 hash 与文件清单见 `src/core/font-resources.js`；许可证为 SIL Open Font License。粗体的两个排版角色共用同一个源文件。字体目录已被 Git 忽略，不提交字体二进制。
+
+有本地缓存时可执行 `npm run prepare:fonts -- --cache-dir /path/to/cache`。缓存文件名采用清单的 `name` 字段（许可证分别为 `source-han-sans-LICENSE.txt` 和 `source-han-serif-LICENSE.txt`）；只有长度和 hash 都符合才复用。已有目标文件校验通过后直接复用，缓存损坏时重新下载。下载超时、HTTP 失败、长度或 hash 不符时命令失败，不替换已有文件，也不会留下本次临时片段。普通转换不会自动联网准备字体；字体缺失会提示先运行准备命令。
+
+批处理无参数仍只处理 `11,12,13`；`--volumes` 覆盖这个默认批次。指定的纯数字卷按以下路径查找，无需增加卷号白名单。相对默认素材以外层仓库根为基准，`--root` 可替换该根目录：
+
+- 图源优先 `output/hyread/[三河ごーすと].义妹生活.NN.[台繁].hyread.epub`，其次 `义妹生活NN[台繁].epub`。12 卷保留例外：优先根目录旧台繁源，缺失时回退到存在的 HyRead 源。08、11、13 保留原有 HyRead 优先级。
+- 基础排版参考为根目录文件名包含 `义妹生活.07.` 和 `[台简]` 的 EPUB；同卷特典与排版素材来自 `output/healed/` 下包含 `义妹生活.NN.` 与 `[日翻].healed.epub` 的文件。文件名匹配支持 NFC/NFD Unicode 形式。
+- 存在 `NN.html` 时沿用 HTML 入口，否则直接读取 HyRead EPUB。所有卷的必需输入和字体预检通过后才创建输出或备份。
+
+默认产物为 `output/simple/[三河ごーすと].义妹生活.NN.[台简].epub` 和同名的 `[台简][特典].epub`。普通版不含特典，附特典版导入同卷 healed 源的特典。重建前会把已有同卷两种成品复制到 `backup-before-build-时间戳/`；`--skip-backup` 可关闭备份。
+
+单卷入口保留显式路径参数：
+
+```bash
+node bin/cli.js hyread-to-simple --volume 14 --out /path/to/14.epub
+node bin/cli.js hyread-to-simple --volume another-days --source /path/to/source.epub --ref /path/to/ref.epub --out /path/to/another-days.epub
+```
+
+`--source`、`--ref`、`--style-ref` 分别覆盖自动查找的字段，已提供的输入不依赖默认目录存在。11/12/13 省略 `--style-ref` 时继续查找默认同卷 healed 源；其他数字卷以及 `another-days` 在同时显式提供 `--source` 和 `--ref` 时，允许省略 `--style-ref`，只使用基础布局。数字卷需要自动补齐 source/ref 时，也会要求同卷 healed 源。`another-days`（含 `an`、`AN` 别名）必须显式提供 source/ref。单卷默认附特典，`--no-include-specials` 生成普通版。
+
+HyRead 入口按源文位置识别章节标题和原生 ruby，本体与读音都繁转简，不会把正文中相同的普通字符串自动改成 ruby。HTML 入口保留已有显式 `--ruby 'text|base|ruby'` 参数，用于为普通文本指定替换串、ruby 本体与读音；它属于文本匹配兼容模式，不能恢复源书中已经丢失的注音位置。生成时统一 OPF/NCX 的 UUID，修复导入脚注的重复 ID，并在发布输出前检查 EPUB 元数据、内部资源与片段链接、重复 ID、manifest 和 spine 等结构；校验失败时保留已有输出。结构检查不能替代阅读器显示验收。
 
 ### migrate-translation（09 卷台版译文迁移，绑义妹生活）
 

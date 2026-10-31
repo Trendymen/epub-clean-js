@@ -20,6 +20,12 @@ export const SOURCE_FONTS = {
   serifBoldSub:  path.join(BOOKS, 'source-han-serif-sc/SourceHanSerifSC-Bold.otf'),
 };
 
+export function assertSourceFontsAvailable(sources = SOURCE_FONTS, roles = Object.keys(sources)) {
+  const missing = [...new Set(roles.map(role => sources[role]))]
+    .filter(file => !file || !fs.existsSync(file) || !fs.statSync(file).isFile());
+  if (missing.length) throw new Error(`Missing source fonts:\n${missing.join('\n')}\nRun npm run prepare:fonts first.`);
+}
+
 // @font-face 默认不声明 font-weight：日翻原版即单面族+规则层 font-weight，
 // 保留规则层声明可让阅读器合成加粗行为与原版一致。
 // 唯一例外是副标题 Bold Sub 面（与 serifBold 同源、按 h5/.ch3 用字独立子集化）：
@@ -134,6 +140,7 @@ async function subsetOne(srcPath, set) {
 }
 
 export async function subsetAll(charsets, sources = SOURCE_FONTS) {
+  assertSourceFontsAvailable(sources, NEW_FONTS.filter(def => charsets[def.role]?.size).map(def => def.role));
   const out = {};
   for (const def of NEW_FONTS) {
     out[def.role] = await subsetOne(sources[def.role], charsets[def.role] ?? new Set());

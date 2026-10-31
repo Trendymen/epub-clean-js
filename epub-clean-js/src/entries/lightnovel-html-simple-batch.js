@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { buildLightNovelEpub, buildLightNovelEpubFromBook } from '../../books/yimei-seikatsu/lightnovel-html/index.js';
 import { parseHyreadEpubToBook } from '../../books/yimei-seikatsu/hyread-parser.js';
+import { assertSourceFontsAvailable } from '../core/font-subset.js';
 
 export const defaultRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
@@ -13,6 +14,7 @@ function normalizeFileName(name) {
 }
 
 function findInDir(dir, predicate, description) {
+  if (!fs.existsSync(dir)) throw new Error(`Missing ${description} in ${dir}`);
   const entries = fs.readdirSync(dir, { withFileTypes: true });
   const hit = entries
     .filter((entry) => entry.isFile())
@@ -49,39 +51,44 @@ export function rubyAnnotationsForVolume(volume) {
 }
 
 export function resolveSourceImageEpubPath(root, volume) {
-  if (volume === '08' || volume === '11' || volume === '13') {
-    const hyreadDir = path.join(root, 'output/hyread');
-    if (fs.existsSync(hyreadDir)) {
-      const hyreadSource = fs.readdirSync(hyreadDir, { withFileTypes: true })
-        .filter((entry) => entry.isFile())
-        .map((entry) => entry.name)
-        .find((name) => normalizeFileName(name) === `[三河ごーすと].义妹生活.${volume}.[台繁].hyread.epub`);
-      if (hyreadSource) return path.join(hyreadDir, hyreadSource);
-    }
-  }
-
+  if (!/^\d+$/.test(volume)) throw new Error(`Automatic source lookup requires a numeric volume: ${volume}`);
   const taiwanSource = path.join(root, `义妹生活${volume}[台繁].epub`);
+  if (volume === '12' && fs.existsSync(taiwanSource)) return taiwanSource;
+  const hyreadDir = path.join(root, 'output/hyread');
+  const expected = `[三河ごーすと].义妹生活.${volume}.[台繁].hyread.epub`;
+  if (fs.existsSync(hyreadDir)) {
+    const hit = fs.readdirSync(hyreadDir, { withFileTypes: true })
+      .find(entry => entry.isFile() && normalizeFileName(entry.name) === expected);
+    if (hit) return path.join(hyreadDir, hit.name);
+  }
   if (fs.existsSync(taiwanSource)) return taiwanSource;
-
-  return taiwanSource;
+  throw new Error(`Missing source EPUB: ${path.join(hyreadDir, expected)} or ${taiwanSource}`);
 }
 
-export function resolveInputs(root, volume) {
+export function resolveInputs(root, volume, {
+  sourceImageEpubPath = null, refEpubPath = null, styleRefEpubPath = null,
+  requireStyleRef = true,
+} = {}) {
+  root = path.resolve(root);
   const htmlPath = path.join(root, `${volume}.html`);
   const hasHtml = fs.existsSync(htmlPath);
 
-  const refEpubPath = findInDir(
+  sourceImageEpubPath ||= resolveSourceImageEpubPath(root, volume);
+  refEpubPath ||= findInDir(
     root,
     (name) => name.includes('义妹生活.07.') && name.includes('[台简]') && name.endsWith('.epub'),
     '07 台简 reference EPUB',
   );
-  const sourceImageEpubPath = resolveSourceImageEpubPath(root, volume);
   const healedDir = path.join(root, 'output/healed');
-  const styleRefEpubPath = findInDir(
+  if (!styleRefEpubPath && requireStyleRef) styleRefEpubPath = findInDir(
     healedDir,
     (name) => name.includes(`义妹生活.${volume}.`) && name.includes('[日翻].healed.epub'),
     `${volume} healed style-ref EPUB`,
   );
+
+  for (const file of [sourceImageEpubPath, refEpubPath, styleRefEpubPath].filter(Boolean)) {
+    if (!fs.existsSync(file) || !fs.statSync(file).isFile()) throw new Error(`Missing input EPUB: ${file}`);
+  }
 
   return { htmlPath: hasHtml ? htmlPath : null, refEpubPath, sourceImageEpubPath, styleRefEpubPath };
 }
@@ -116,12 +123,14 @@ export async function runBatch({ root = defaultRoot, outDir = null, volumes = ['
     录入: creditName,
   };
 
+  const resolvedVolumes = volumes.map(volume => ({ volume, inputs: resolveInputs(resolvedRoot, volume) }));
+  assertSourceFontsAvailable();
+
   fs.mkdirSync(resolvedOutDir, { recursive: true });
   const backupDir = backup ? backupOutputs(resolvedOutDir, volumes) : null;
   if (backupDir) console.log(`已备份当前成品: ${backupDir}`);
 
-  for (const volume of volumes) {
-    const inputs = resolveInputs(resolvedRoot, volume);
+  for (const { volume, inputs } of resolvedVolumes) {
     const baseName = `[三河ごーすと].义妹生活.${volume}.[台简]`;
     const common = {
       ...inputs,
@@ -130,7 +139,7 @@ export async function runBatch({ root = defaultRoot, outDir = null, volumes = ['
       rubyAnnotations: rubyAnnotationsForVolume(volume),
     };
 
-    // 卷13 没有 HTML 源，使用 hyread EPUB 直转路径
+    // 没有 HTML 时直接读取 HyRead EPUB。
     const isHyreadDirect = !inputs.htmlPath;
 
     for (const variant of [

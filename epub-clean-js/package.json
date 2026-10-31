@@ -14,6 +14,7 @@
     "migrate-translation": "node bin/cli.js migrate-translation",
     "footnote-fix": "node bin/cli.js footnote-fix",
     "build:yimei-simple": "node bin/cli.js build-yimei-simple",
+    "prepare:fonts": "node bin/cli.js prepare-fonts",
     "test": "node test/run-tests.mjs",
     "test:unit": "node test/run-tests.mjs unit",
     "test:e2e": "node test/run-tests.mjs e2e",

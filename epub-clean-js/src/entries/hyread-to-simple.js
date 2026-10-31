@@ -2,7 +2,7 @@
  * hyread-to-simple.js — HyRead EPUB → 台简 EPUB CLI 入口
  *
  * 用法:
- *   # 11-13 会从统一 resolver 自动选择:
+ *   # 数字卷从统一 resolver 自动选择:
  *   #   ref       = 根目录 07 台简
  *   #   style-ref = output/healed/同卷 [日翻].healed.epub
  *   #   source    = resolver 指定的台繁/HyRead 图源
@@ -18,6 +18,7 @@ import { pathToFileURL } from 'node:url';
 import { parseHyreadEpubToBook, parseAnotherDaysEpubToBook } from '../../books/yimei-seikatsu/hyread-parser.js';
 import { buildLightNovelEpubFromBook } from '../../books/yimei-seikatsu/lightnovel-html/index.js';
 import { defaultRoot, resolveInputs } from './lightnovel-html-simple-batch.js';
+import { assertSourceFontsAvailable } from '../core/font-subset.js';
 
 // 短篇合集卷走专门 parser（保留 p-fmatter 彩插与配对正文的 spine 穿插位置）
 const ANOTHER_DAYS_VOLUMES = new Set(['another-days', 'an', 'AN']);
@@ -35,15 +36,17 @@ export async function buildHyreadToSimple({
   creditSource = null,
   creditInput = null,
 }) {
-  const pinnedInputs = PINNED_REFERENCE_VOLUMES.has(volume)
-    ? resolveInputs(path.resolve(root), volume)
-    : null;
-  const resolvedSourceEpubPath = sourceEpubPath || pinnedInputs?.sourceImageEpubPath;
-  const resolvedRefEpubPath = refEpubPath || pinnedInputs?.refEpubPath;
-  const resolvedStyleRefEpubPath = styleRefEpubPath || pinnedInputs?.styleRefEpubPath || null;
-  if (!resolvedSourceEpubPath) throw new Error('Missing --source (or use --volume 11/12/13 with --root for resolver defaults)');
-  if (!resolvedRefEpubPath) throw new Error('Missing --ref (or use --volume 11/12/13 with --root for resolver defaults)');
   if (!outEpubPath) throw new Error('Missing --out');
+  if (!/^\d+$/.test(volume) && (!sourceEpubPath || !refEpubPath)) {
+    throw new Error(`Volume ${volume} requires explicit --source and --ref`);
+  }
+  const inputs = resolveInputs(path.resolve(root), volume, {
+    sourceImageEpubPath: sourceEpubPath,
+    refEpubPath,
+    styleRefEpubPath,
+    requireStyleRef: PINNED_REFERENCE_VOLUMES.has(volume) || !sourceEpubPath || !refEpubPath,
+  });
+  assertSourceFontsAvailable();
 
   const creditOverrides = {
     图源: creditSource || creditName,
@@ -51,15 +54,15 @@ export async function buildHyreadToSimple({
   };
 
   const book = ANOTHER_DAYS_VOLUMES.has(volume)
-    ? await parseAnotherDaysEpubToBook(resolvedSourceEpubPath, { volume, creditOverrides })
-    : await parseHyreadEpubToBook(resolvedSourceEpubPath, { volume, creditOverrides });
+    ? await parseAnotherDaysEpubToBook(inputs.sourceImageEpubPath, { volume, creditOverrides })
+    : await parseHyreadEpubToBook(inputs.sourceImageEpubPath, { volume, creditOverrides });
   const sourceImages = book._sourceImages;
   delete book._sourceImages; // 内部字段，不传给渲染管线
 
   const result = await buildLightNovelEpubFromBook(book, {
     sourceImages,
-    refEpubPath: resolvedRefEpubPath,
-    styleRefEpubPath: resolvedStyleRefEpubPath,
+    refEpubPath: inputs.refEpubPath,
+    styleRefEpubPath: inputs.styleRefEpubPath,
     outEpubPath,
     volume,
     includeSpecials,
