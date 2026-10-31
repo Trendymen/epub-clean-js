@@ -135,8 +135,13 @@ test('failed restoration is reported as observation and does not erase completed
   assert.equal(report.ok, true); assert.deepEqual(report.restoration, f.audit.meta.restoration);
 });
 
-test('official menu may omit an introduction structure page without hiding a missing body chapter', async (t) => {
-  const f = await fixture(t);
+for (const [name, options, expectedOk] of [
+  ['verified volume 14 introduction', { volume: '14', assetId: '2d68797b1326483e9294e44696a80267' }, true],
+  ['another book using p-001 for body text', {}, false],
+  ['same volume with another asset', { volume: '14', assetId: 'different-14-book' }, false],
+  ['same asset with another volume', { volume: '13', assetId: '2d68797b1326483e9294e44696a80267' }, false],
+]) test(`official menu omission: ${name}`, async (t) => {
+  const f = await fixture(t, options);
   f.resources['standard.opf'] = Buffer.from(f.resources['standard.opf'].toString().replace('xhtml/body1.xhtml', 'xhtml/p-001.xhtml'));
   f.resources['xhtml/p-001.xhtml'] = f.resources['xhtml/body1.xhtml'];
   const { config, session } = await prepareSession(f.config, { fetchImpl: f.fetchImpl });
@@ -147,7 +152,8 @@ test('official menu may omit an introduction structure page without hiding a mis
   await writeFile(config.capturePath, JSON.stringify(f.capture));
   f.epubPath = (await buildHyreadEpub(config, { replace: true })).outputPath;
   const report = await verifyHyreadEpub(f);
-  assert.equal(report.ok, true, JSON.stringify(report.checks));
+  assert.equal(report.ok, expectedOk, JSON.stringify(report.checks));
+  if (!expectedOk) assert.ok(report.checks.live.issues.some((issue) => issue.includes('TOC chapter missing from live menu: xhtml/p-001.xhtml')));
 });
 
 test('volume 08 corrections apply only to output, raw audit remains strict and extra edits fail', async (t) => {
@@ -206,4 +212,25 @@ test('semantic export rejects signed image URLs before creating material', async
   const f = await fixture(t);
   f.audit.records[0].images[0].src += '?data=private';
   await assert.rejects(exportSemanticMaterial(f.audit, join(f.config.workDir, 'unsafe-semantic')), /image|URL/);
+});
+
+for (const [name, url] of [
+  ['parenthesis in path', 'https://example.invalid/item/(file)?token=PRIVATE_PATH'],
+  ['parenthesis in query', 'https://example.invalid/reader.jsp?data=prefix)PRIVATE_QUERY'],
+  ['parenthesis in credentials', 'https://name):PRIVATE_CREDENTIAL@example.invalid/item/file?data=PRIVATE_DATA'],
+  ['unparseable URL with sensitive tail', 'https://[invalid)host/item?data=PRIVATE_INVALID'],
+]) test(`report URL redaction consumes the complete ${name}`, async (t) => {
+  const f = await fixture(t); f.audit.meta.restoration.error = url;
+  const report = await verifyHyreadEpub(f);
+  assert.equal(report.ok, true);
+  assert.doesNotMatch(JSON.stringify(report), /PRIVATE_|token=|data=|name\)/u);
+  const paths = await writeVerificationReports(report, join(f.config.workDir, 'url-redaction.json'));
+  for (const path of [paths.jsonPath, paths.markdownPath]) assert.doesNotMatch(await readFile(path, 'utf8'), /PRIVATE_|token=|data=|name\)/u);
+});
+
+for (const unavailable of ['missing.epub', '.']) test(`unavailable EPUB ${unavailable} leaves capture comparison not-run`, async (t) => {
+  const f = await fixture(t); f.epubPath = join(f.config.workDir, unavailable);
+  const report = await verifyHyreadEpub(f);
+  assert.equal(report.ok, false); assert.equal(report.checks.structure.status, 'failed');
+  assert.equal(report.checks.capture.status, 'not-run'); assert.equal(report.perDocument.length, 0);
 });

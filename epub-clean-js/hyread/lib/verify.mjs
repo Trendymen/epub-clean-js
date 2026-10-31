@@ -80,8 +80,9 @@ function compareToc(audit, entries, session, base, add) {
     if (matched.has(index)) continue;
     const href = resourceHref(entry.src, session);
     const record = audit.records.find((v) => v.src === entry.src);
+    const verifiedIntroduction = session.volume === '14' && session.assetId === '2d68797b1326483e9294e44696a80267' && href === 'xhtml/p-001.xhtml';
     const structural = !record?.bodyText || /(?:^|\/)(?:p-)?(?:cover|titlepage|toc(?:-\d+)?|colophon|fmatter-\d+)\.xhtml$/iu.test(href)
-      || href === 'xhtml/p-001.xhtml';
+      || verifiedIntroduction;
     if (!structural) add(`TOC chapter missing from live menu: ${href}`);
   }
 }
@@ -96,13 +97,14 @@ export async function verifyHyreadEpub({ config, session, capture, audit, epubPa
   try {
     report.artifact.sha256 = sha256(await readFile(epubPath));
   } catch (error) { fail('structure', `Cannot read EPUB: ${error.message}`); }
+  let captureValid = false;
   try {
     validateCapture(capture, session);
     if (config.volume !== session.volume || config.assetId !== session.assetId || config.bookTitle !== session.title) throw new Error('Config belongs to another session');
-    report.checks.capture.status = 'passed';
+    captureValid = true;
   } catch (error) { fail('capture', `Capture validation failed: ${error.message}`); }
   let built, entries;
-  if (report.checks.capture.status === 'passed' && report.artifact.sha256 !== null) {
+  if (captureValid && report.artifact.sha256 !== null) {
     try {
       built = await checkBuiltEpub({ config, session, capture, epubPath });
       report.checks.structure.status = 'passed';
@@ -122,7 +124,7 @@ export async function verifyHyreadEpub({ config, session, capture, audit, epubPa
     try { validateAuditEnvelope(audit, session); auditValid = true; report.checks.live.status = 'passed'; report.restoration = audit.meta.restoration; }
     catch (error) { fail('live', `Audit validation failed: ${error.message}`); }
   } else if (requireLive) report.checks.live.issues.push('Live audit is required but was not provided');
-  if (report.checks.capture.status !== 'not-run' && entries) {
+  if (captureValid && entries) {
     for (const [index, item] of session.spine.entries()) {
       const src = capture.order[index];
       const documentReport = { href: item.href, src, spineIndex: index, captureStatus: 'passed', liveStatus: auditValid ? 'passed' : 'not-run', rawTextEqual: false, issues: [] };
@@ -157,6 +159,7 @@ export async function verifyHyreadEpub({ config, session, capture, audit, epubPa
         }
       } catch (error) { add(auditValid ? 'live' : 'capture', `Document inspection failed: ${error.message}`); }
     }
+    if (report.checks.capture.status !== 'failed') report.checks.capture.status = 'passed';
   }
   if (auditValid) {
     for (const issue of audit.issues) fail('live', `Audit issue ${issue.type}: ${resourceHref(issue.src, session)}${issue.page === undefined ? '' : ` page ${issue.page}`}`);
