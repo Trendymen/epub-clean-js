@@ -50,7 +50,7 @@ function auditObservations(record) {
     blocks: record.paragraphs.map(({ tag, id, text, semantic }) => ({ tag, id, text, semantic })),
     images: record.images.map(({ tag, src, alt, paragraphIndex }) => ({ tag, src, alt, paragraphIndex })),
     ruby: record.ruby,
-    links: record.bodyLinks.map((link) => ({ ...link, href: new URL(link.href, record.src).href })),
+    links: record.bodyLinks.map(({ text, href }) => ({ text, href: new URL(href, record.src).href })),
   };
 }
 
@@ -121,21 +121,23 @@ export async function verifyHyreadEpub({ config, session, capture, audit, epubPa
   }
   let auditValid = false;
   if (audit !== undefined && audit !== null) {
-    try { validateAuditEnvelope(audit, session); auditValid = true; report.checks.live.status = 'passed'; report.restoration = audit.meta.restoration; }
+    try { validateAuditEnvelope(audit, session); auditValid = true; report.restoration = audit.meta.restoration; }
     catch (error) { fail('live', `Audit validation failed: ${error.message}`); }
   } else if (requireLive) report.checks.live.issues.push('Live audit is required but was not provided');
   if (captureValid && entries) {
     for (const [index, item] of session.spine.entries()) {
       const src = capture.order[index];
-      const documentReport = { href: item.href, src, spineIndex: index, captureStatus: 'passed', liveStatus: auditValid ? 'passed' : 'not-run', rawTextEqual: false, issues: [] };
+      const documentReport = { href: item.href, src, spineIndex: index, captureStatus: 'not-run', liveStatus: 'not-run', rawTextEqual: false, issues: [] };
       report.perDocument.push(documentReport);
       const add = (kind, issue) => {
         documentReport[`${kind}Status`] = 'failed';
         documentReport.issues.push({ check: kind, issue, evidence: { src, spineIndex: index } });
         fail(kind, `${item.href}: ${issue}`);
       };
+      let raw;
+      try { raw = observations(capture.data[src], src); }
+      catch (error) { add('capture', `Document inspection failed: ${error.message}`); continue; }
       try {
-        const raw = observations(capture.data[src], src);
         const correction = applyApprovedCorrections(capture.data[src], { volume: session.volume, assetId: session.assetId, href: item.href });
         const output = entries[`item/${item.href}`];
         if (!output) add('capture', 'Missing EPUB document');
@@ -144,7 +146,10 @@ export async function verifyHyreadEpub({ config, session, capture, audit, epubPa
           documentReport.rawTextEqual = raw.bodyText === actual.bodyText;
           compareObservations(observations(correction.html, src), actual, (issue) => add('capture', issue));
         }
-        if (auditValid) {
+        if (documentReport.captureStatus !== 'failed') documentReport.captureStatus = 'passed';
+      } catch (error) { add('capture', `Document inspection failed: ${error.message}`); }
+      if (auditValid) {
+        try {
           const record = audit.records.find((v) => v.spineIndex === index);
           compareObservations(raw, auditObservations(record), (issue) => add('live', issue));
           report.stats.liveDocuments++; report.stats.liveBlocks += record.paragraphs.length; report.stats.livePages += record.pageCount;
@@ -156,10 +161,11 @@ export async function verifyHyreadEpub({ config, session, capture, audit, epubPa
           if (unseen.length) add('live', `Text blocks lack page coverage: ${unseen.join(',')}`);
           for (const error of record.errors) add('live', `Reader loading error: ${error}`);
           for (const image of record.images) if (image.tag === 'img' && (!image.complete || image.naturalWidth <= 0)) add('live', `Image failed to load: ${resourceHref(image.src, session)}`);
-        }
-      } catch (error) { add(auditValid ? 'live' : 'capture', `Document inspection failed: ${error.message}`); }
+          if (documentReport.liveStatus !== 'failed') documentReport.liveStatus = 'passed';
+        } catch (error) { add('live', `Document inspection failed: ${error.message}`); }
+      }
     }
-    if (report.checks.capture.status !== 'failed') report.checks.capture.status = 'passed';
+    if (report.checks.capture.status !== 'failed' && report.perDocument.length === session.spine.length && report.perDocument.every((item) => item.captureStatus === 'passed')) report.checks.capture.status = 'passed';
   }
   if (auditValid) {
     for (const issue of audit.issues) fail('live', `Audit issue ${issue.type}: ${resourceHref(issue.src, session)}${issue.page === undefined ? '' : ` page ${issue.page}`}`);
@@ -175,6 +181,7 @@ export async function verifyHyreadEpub({ config, session, capture, audit, epubPa
       }
     }
   }
+  if (auditValid && report.checks.live.status !== 'failed' && report.perDocument.length === session.spine.length && report.perDocument.every((item) => item.liveStatus === 'passed')) report.checks.live.status = 'passed';
   report.ok = !Object.values(report.checks).some((value) => value.status === 'failed') && (!requireLive || report.checks.live.status === 'passed');
   return sanitizeEvidence(report);
 }

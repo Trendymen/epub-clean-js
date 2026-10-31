@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { createBrowserFixture, exportFixture } from '../helpers/hyread-browser-fixture.mjs';
 import { createBrowserScript } from '../../hyread/lib/browser-script.mjs';
 
-const bookSource = (href) => 'https://service.ebook.hyread.com.tw/ebookservice/epub/fixture-book-09/item/' + href;
+const bookSource = (href) => 'https://service.ebook.hyread.com.tw/ebookservice/epub/09090909090909090909090909090909/item/' + href;
 const timing = { timeoutMs: 400, pollMs: 2, stableSamples: 3 };
 async function fixture(t, options) { const f = await createBrowserFixture(options); t.after(() => f.cleanup()); await f.install(); return f; }
 
@@ -197,7 +197,7 @@ test('NFKC and whitespace normalization accept the same reader title', async (t)
 
 test('mismatched asset and source paths fail before a completed export exists', async (t) => {
   const f = await fixture(t);
-  await assert.rejects(f.api().start({ session: { ...f.session, assetId: 'another-book' }, ...timing }), /another book/);
+  await assert.rejects(f.api().start({ session: { ...f.session, assetId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }, ...timing }), /another book/);
   const session = structuredClone(f.session);
   session.spine[1].id = 'different-id'; session.manifest[1].id = 'different-id';
   await assert.rejects(f.api().start({ session, ...timing }), /differs from session/);
@@ -413,9 +413,9 @@ test('produced capture keys remain compatible with the legacy item URL mapper', 
   const mappedOrder = value.order.map((src) => src.split('/item/')[1]);
   assert.deepEqual(mappedOrder, ['xhtml/cover.xhtml', 'xhtml/body1.xhtml', 'xhtml/body2.xhtml']);
   assert.deepEqual(value.order, [
-    'https://service.ebook.hyread.com.tw/ebookservice/epub/fixture-book-09/item/xhtml/cover.xhtml',
-    'https://service.ebook.hyread.com.tw/ebookservice/epub/fixture-book-09/item/xhtml/body1.xhtml',
-    'https://service.ebook.hyread.com.tw/ebookservice/epub/fixture-book-09/item/xhtml/body2.xhtml',
+    'https://service.ebook.hyread.com.tw/ebookservice/epub/09090909090909090909090909090909/item/xhtml/cover.xhtml',
+    'https://service.ebook.hyread.com.tw/ebookservice/epub/09090909090909090909090909090909/item/xhtml/body1.xhtml',
+    'https://service.ebook.hyread.com.tw/ebookservice/epub/09090909090909090909090909090909/item/xhtml/body2.xhtml',
   ]);
   const legacyData = Object.fromEntries(value.order.map((src) => [src.split('/item/')[1], value.data[src]]));
   assert.match(legacyData['xhtml/cover.xhtml'], /alt="封面"/);
@@ -435,9 +435,15 @@ test('describe before start and all audit public source fields use canonical boo
   for (const src of publicSources) {
     const url = new URL(src);
     assert.equal(url.origin, 'https://service.ebook.hyread.com.tw');
-    assert.match(url.pathname, /^\/ebookservice\/epub\/fixture-book-09\/item\/xhtml\/[^/]+\.xhtml$/);
+    assert.match(url.pathname, /^\/ebookservice\/epub\/09090909090909090909090909090909\/item\/xhtml\/[^/]+\.xhtml$/);
     assert.equal(url.search, '');
     assert.equal(url.hash, '');
   }
   assert.deepEqual(value.records.find((entry) => entry.spineId === 'body1').bodyLinks, [{ text: '回上段', href: '#first' }]);
+});
+
+for (const assetId of ['a'.repeat(31), 'a'.repeat(33), 'g'.repeat(32), 'synthetic_not_hex']) test('B3: browser rejects non-contract assetId before identity lookup ' + assetId, async (t) => {
+  const f = await fixture(t);
+  await assert.rejects(f.api().start({ session: { ...f.session, assetId }, ...timing }), /Invalid session/);
+  assert.equal(f.api().status().state, 'idle');
 });

@@ -121,7 +121,7 @@ export async function loadSession(sessionPath, { outputPath } = {}) {
   const workDir = dirname(sessionPath);
   const safeSessionPath = await safeJoin(workDir, basename(sessionPath));
   const session = validateSession(JSON.parse(await readFile(safeSessionPath, 'utf8')));
-  const config = generationConfig(resolveHyreadConfig({ volume: session.volume, assetId: session.assetId, title: session.title, workDir, outputPath }), session);
+  const config = generationConfig({ ...resolveHyreadConfig({ volume: session.volume, assetId: session.assetId, title: session.title, workDir, outputPath }), sessionPath: safeSessionPath }, session);
   await safeJoin(workDir, session.resourceRoot);
   const itemPrefix = `${session.resourceRoot}/ebookservice/epub/${session.assetId}/item/`;
   let opf;

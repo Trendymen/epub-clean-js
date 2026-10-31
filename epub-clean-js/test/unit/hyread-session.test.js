@@ -24,11 +24,11 @@ test('book config derives default paths from the module and explicit paths from 
   const cwd = process.cwd();
   try {
     process.chdir(temporary);
-    const config = legacy.resolveHyreadConfig({ volume: '9', assetId: 'book-09', title: '測試書 9' });
+    const config = legacy.resolveHyreadConfig({ volume: '9', assetId: '09090909090909090909090909090909', title: '測試書 9' });
     assert.equal(config.volume, '09');
     assert.equal(config.bookTitle, '測試書 9');
     assert.equal(config.workDir, join(dirname(fileURLToPath(new URL('../../hyread/config.mjs', import.meta.url))), 'work', '09'));
-    const explicit = legacy.resolveHyreadConfig({ volume: 12, assetId: 'book-12', title: '測試書 12', workDir: 'work', outputPath: 'book.epub', projectRoot: 'project' });
+    const explicit = legacy.resolveHyreadConfig({ volume: 12, assetId: '12121212121212121212121212121212', title: '測試書 12', workDir: 'work', outputPath: 'book.epub', projectRoot: 'project' });
     assert.equal(explicit.workDir, join(temporary, 'work'));
     assert.equal(explicit.outputPath, join(temporary, 'book.epub'));
     assert.equal(explicit.projectRoot, join(temporary, 'project'));
@@ -54,7 +54,7 @@ test('prepare publishes the OPF manifest order, spine order and exact resource h
   assert.equal(session.sourceOpfSha256, hash(f.opf));
   assert.match(session.resourceRoot, /^resources\/generations\/[a-zA-Z0-9-]+$/);
   assert.equal(config.resourcesDir, join(f.config.workDir, session.resourceRoot));
-  assert.equal(config.itemDir, join(config.resourcesDir, 'ebookservice/epub/fixture-book-09/item'));
+  assert.equal(config.itemDir, join(config.resourcesDir, 'ebookservice/epub/09090909090909090909090909090909/item'));
   assert.deepEqual(Object.keys(session.resources).sort(), Object.keys(f.resources).sort());
   for (const [href, bytes] of Object.entries(f.resources)) {
     assert.deepEqual(session.resources[href], { bytes: bytes.length, sha256: hash(bytes) });
@@ -101,7 +101,7 @@ test('prepare rejects invalid HTTP responses, empty resources, redirects and tim
     async () => response('failure', 403),
     async () => response(''),
     async () => response(f.opf, 200, 'https://other.example/standard.opf'),
-    async () => response(f.opf, 200, f.config.itemBase.replace(f.config.assetId, 'other-book') + 'standard.opf'),
+    async () => response(f.opf, 200, f.config.itemBase.replace(f.config.assetId, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa') + 'standard.opf'),
     async () => new Promise(() => {}),
   ]) await assert.rejects(sessionApi.prepareSession(f.config, { fetchImpl, timeoutMs: 15 }));
   assert.equal(existsSync(f.config.sessionPath), false);
@@ -135,7 +135,7 @@ test('failed refresh preserves every old byte and prevents using a work director
   await assert.rejects(sessionApi.prepareSession(f.config, { fetchImpl: failingFetch }));
   assert.deepEqual(await readFile(f.config.sessionPath), sessionBytes);
   assert.deepEqual((await sessionApi.loadSession(f.config.sessionPath)).session, first.session);
-  const other = await createHyreadFixture({ workDir: f.config.workDir, assetId: 'different-book', title: '另一測試書' });
+  const other = await createHyreadFixture({ workDir: f.config.workDir, assetId: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', title: '另一測試書' });
   t.after(other.cleanup);
   let requests = 0;
   await assert.rejects(sessionApi.prepareSession(other.config, { fetchImpl: (...args) => { requests++; return other.fetchImpl(...args); } }), /belongs to another book/);
@@ -242,8 +242,8 @@ test('validateSession rejects file ancestors even when a sibling separates sorte
 
 test('two processes cannot publish different books into one initially empty work directory', { timeout: 15000 }, async (t) => {
   const f = await fixture(t);
-  const first = startHyreadPrepareProcess({ workDir: f.config.workDir, assetId: 'process-book-a', title: 'Book A' });
-  const second = startHyreadPrepareProcess({ workDir: f.config.workDir, assetId: 'process-book-b', title: 'Book B' });
+  const first = startHyreadPrepareProcess({ workDir: f.config.workDir, assetId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', title: 'Book A' });
+  const second = startHyreadPrepareProcess({ workDir: f.config.workDir, assetId: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', title: 'Book B' });
   t.after(first.kill);
   t.after(second.kill);
   await Promise.all([first.ready, second.ready]);
@@ -287,7 +287,7 @@ test('a process interrupted before session publication keeps its book binding an
   t.after(interrupted.kill);
   await interrupted.ready;
   assert.equal(existsSync(f.config.sessionPath), false);
-  const other = await createHyreadFixture({ workDir: f.config.workDir, assetId: 'different-book', title: 'Other Book' });
+  const other = await createHyreadFixture({ workDir: f.config.workDir, assetId: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', title: 'Other Book' });
   t.after(other.cleanup);
   await assert.rejects(sessionApi.prepareSession(other.config, { fetchImpl: other.fetchImpl }), /belongs to another book/);
   interrupted.kill();
@@ -322,11 +322,15 @@ test('safeJoin tolerates another resource writer creating the shared parent dire
 });
 
 test('book config rejects unsafe identities and keeps legacy volume 08 defaults', () => {
-  for (const volume of ['', '0', '-1', '../9', '1.2']) assert.throws(() => legacy.resolveHyreadConfig({ volume, assetId: 'book', title: 'Title' }));
+  for (const volume of ['', '0', '-1', '../9', '1.2']) assert.throws(() => legacy.resolveHyreadConfig({ volume, assetId: '09090909090909090909090909090909', title: 'Title' }));
   for (const assetId of ['', '../book', 'book/id', 'book?x', 'book%2fother']) assert.throws(() => legacy.resolveHyreadConfig({ volume: 9, assetId, title: 'Title' }));
-  for (const title of ['', '  ', 'Title\u0000']) assert.throws(() => legacy.resolveHyreadConfig({ volume: 9, assetId: 'book', title }));
+  for (const title of ['', '  ', 'Title\u0000']) assert.throws(() => legacy.resolveHyreadConfig({ volume: 9, assetId: '09090909090909090909090909090909', title }));
   assert.equal(legacy.VOLUME, '08');
   assert.equal(legacy.ASSET_ID, '8a8a84ca8cf2eb56018d6786f66a472c');
   assert.equal(legacy.BOOK_TITLE, '義妹生活 8');
   assert.equal(legacy.WORK, resolve(dirname(fileURLToPath(new URL('../../hyread/config.mjs', import.meta.url))), 'work/08'));
+});
+
+for (const assetId of ['a'.repeat(31), 'a'.repeat(33), 'g'.repeat(32), 'synthetic_not_hex']) test('B3: Node rejects non-contract assetId ' + assetId, () => {
+  assert.throws(() => legacy.resolveHyreadConfig({ volume: 9, assetId, title: 'Title' }), /Invalid assetId/);
 });

@@ -357,7 +357,7 @@
     if (!options || !['capture', 'audit'].includes(options.mode ?? 'capture')) throw new Error('Invalid workflow mode');
     for (const key of ['timeoutMs', 'pollMs', 'stableSamples']) if (options[key] !== undefined && (!Number.isSafeInteger(options[key]) || options[key] < 1)) throw new Error(`Invalid ${key}`);
     const candidate = options.session;
-    if (candidate?.schemaVersion !== 1 || !/^[A-Za-z0-9_-]+$/.test(candidate.assetId) || typeof candidate.title !== 'string' || !candidate.title || !/^[a-f0-9]{64}$/.test(candidate.sourceOpfSha256) || !Array.isArray(candidate.spine) || !candidate.spine.length || candidate.spine.length > 10000 || !Array.isArray(candidate.manifest)) throw new Error('Invalid session');
+    if (candidate?.schemaVersion !== 1 || typeof candidate.assetId !== 'string' || !/^[a-f0-9]{32}$/i.test(candidate.assetId) || typeof candidate.title !== 'string' || !candidate.title || !/^[a-f0-9]{64}$/.test(candidate.sourceOpfSha256) || !Array.isArray(candidate.spine) || !candidate.spine.length || candidate.spine.length > 10000 || !Array.isArray(candidate.manifest)) throw new Error('Invalid session');
     const paths = new Set(), ids = new Set();
     for (const item of candidate.manifest) {
       if (typeof item.href !== 'string' || /[\\%?#\u0000-\u001f]/.test(item.href) || item.href.split('/').some((part) => !part || part === '.' || part === '..') || paths.has(item.href) || typeof item.id !== 'string' || ids.has(item.id)) throw new Error('Invalid session resource paths');

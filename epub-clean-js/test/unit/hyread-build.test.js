@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, writeFile, readdir } from 'node:fs/promises';
+import { readFile, writeFile, readdir, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createHyreadFixture, absoluteHyreadCapture } from '../helpers/hyread-fixtures.mjs';
-import { prepareSession } from '../../hyread/lib/session.mjs';
+import { prepareSession, loadSession } from '../../hyread/lib/session.mjs';
 import { buildHyreadEpub, checkBuiltEpub } from '../../hyread/lib/build.mjs';
 import { normalizeText, inspectXhtml, applyApprovedCorrections } from '../../hyread/lib/content.mjs';
 import { readEpub, writeEpub } from '../../src/core/zip-io.js';
@@ -18,6 +18,21 @@ async function fixture(t, options = {}) {
   return { ...f, config, session, capture };
 }
 
+for (const anotherGeneration of [false, true]) test(`B1: build keeps selected session with default ${anotherGeneration ? 'at another generation' : 'absent'}`, async (t) => {
+  const f = await fixture(t), selected = join(f.config.workDir, 'selected-snapshot.json');
+  const expectedCss = Buffer.from(f.resources['style.css']);
+  await rename(f.config.sessionPath, selected);
+  if (anotherGeneration) {
+    f.resources['style.css'] = Buffer.from('body { line-height: 2.5; }');
+    const next = await prepareSession(f.config, { fetchImpl: f.fetchImpl });
+    assert.notEqual(next.session.resourceRoot, f.session.resourceRoot);
+  }
+  const { config } = await loadSession(selected, { outputPath: f.config.outputPath });
+  const built = await buildHyreadEpub(config);
+  const { entries } = await readEpub(built.outputPath);
+  assert.deepEqual(entries['item/style.css'], expectedCss);
+});
+
 test('inspectXhtml uses leaf blocks and preserves text, ruby, image order and raw links', () => {
   const html = '<html><head><title>排除</title></head><body><div id="outer">外<p id="a"> A　😀 <ruby>字<rt>音</rt></ruby></p><div id="empty"><img src="a.png" alt="圖"/></div></div><svg><image href="b.png"/></svg><a href="#a">連結</a></body></html>';
   assert.equal(normalizeText(' A　\n 😀 '), 'A 😀');
@@ -30,7 +45,7 @@ test('approved corrections require exact volume, asset and path and report unmat
   const result = applyApprovedCorrections(html, context);
   assert.equal(result.html, '<p>６月１日（星期二） ６月１日（星期二）</p>');
   assert.deepEqual(result.corrections.map(({ occurrences, status }) => ({ occurrences, status })), [{ occurrences: 2, status: 'applied' }, { occurrences: 0, status: 'not-applicable' }]);
-  for (const change of [{ volume: '09' }, { assetId: 'other' }, { href: 'xhtml/body.xhtml' }]) assert.equal(applyApprovedCorrections(html, { ...context, ...change }).html, html);
+  for (const change of [{ volume: '09' }, { assetId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }, { href: 'xhtml/body.xhtml' }]) assert.equal(applyApprovedCorrections(html, { ...context, ...change }).html, html);
 });
 
 test('build publishes validated EPUB, preserves all binary/CSS bytes and mixed SVG text', async (t) => {
@@ -352,5 +367,16 @@ test('CQ4: a true CSS dependency identical to a commented link is never classifi
   const result = await checkBuiltEpub({ config: f.config, session: f.session, capture: f.capture, epubPath });
   assert.equal(result.ok, false);
   assert.ok(result.issues.some((issue) => issue.includes('引用 missing.css')));
+  assert.deepEqual(result.ignoredNonElementReferences, []);
+});
+
+test('B5: encoded CSS separators keep equivalent commented missing target in validator failures', async (t) => {
+  const f = await fixture(t), built = await buildHyreadEpub(f.config), { entries } = await readEpub(built.outputPath);
+  entries['item/xhtml/body1.xhtml'] = Buffer.from(entries['item/xhtml/body1.xhtml'].toString().replace('</head>', '<!-- <link href="dir/missing.css"/> --><style>p{background:url(dir%2Fmissing.css)}</style></head>'));
+  const epubPath = join(f.config.workDir, 'encoded-css-and-inert-link.epub'); await writeEpub(epubPath, entries);
+  const result = await checkBuiltEpub({ config: f.config, session: f.session, capture: f.capture, epubPath });
+  assert.equal(result.ok, false);
+  assert.ok(result.issues.some((issue) => issue.includes('引用 dir/missing.css')), JSON.stringify(result));
+  assert.ok(result.issues.some((issue) => /missing dependency dir%2Fmissing.css/.test(issue)));
   assert.deepEqual(result.ignoredNonElementReferences, []);
 });

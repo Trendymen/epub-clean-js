@@ -11,7 +11,7 @@ export function absoluteHyreadCapture(capture, itemBase) {
 export async function createHyreadFixture(options = {}) {
   const { temporaryParent = tmpdir(), ...configOptions } = options;
   const temporary = await mkdtemp(join(temporaryParent, 'hyread-session-'));
-  const config = resolveHyreadConfig({ volume: '09', assetId: 'fixture-book-09', title: '合成測試書 9', workDir: join(temporary, 'work'), projectRoot: temporary, ...configOptions });
+  const config = resolveHyreadConfig({ volume: '09', assetId: '09090909090909090909090909090909', title: '合成測試書 9', workDir: join(temporary, 'work'), projectRoot: temporary, ...configOptions });
   const opf = Buffer.from(`<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata/><manifest>
     <item id="body2" href="xhtml/body2.xhtml" media-type="application/xhtml+xml"/>
     <item id="cover" href="xhtml/cover.xhtml" media-type="application/xhtml+xml"/>

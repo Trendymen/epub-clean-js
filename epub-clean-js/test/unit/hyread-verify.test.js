@@ -47,6 +47,27 @@ test('missing live audit stays not-run and requireLive prevents success', async 
   assert.equal((await verifyHyreadEpub({ ...f, audit: undefined, requireLive: true })).ok, false);
 });
 
+test('B2: invalid capture body fails capture and leaves dependent live comparison not-run', async (t) => {
+  const f = await fixture(t);
+  f.capture.data[f.capture.order[1]] = '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>No body</title></head></html>';
+  const report = await verifyHyreadEpub(f);
+  assert.equal(report.ok, false);
+  assert.equal(report.checks.capture.status, 'failed');
+  assert.equal(report.checks.live.status, 'not-run');
+  assert.equal(report.perDocument[1].captureStatus, 'failed');
+  assert.equal(report.perDocument[1].liveStatus, 'not-run');
+  assert.ok(report.perDocument[1].issues.some(({ check, issue }) => check === 'capture' && /no body/i.test(issue)));
+  assert.equal(report.checks.live.issues.length, 0);
+});
+
+test('B4: reordering only audit link object keys preserves live success', async (t) => {
+  const f = await fixture(t);
+  f.audit.records[1].bodyLinks = [{ href: 'body2.xhtml', text: '下章' }];
+  const report = await verifyHyreadEpub(f);
+  assert.equal(report.ok, true, JSON.stringify(report.checks));
+  assert.equal(report.checks.live.status, 'passed');
+});
+
 test('live verification matches records by spine index, preserves duplicate labels and accepts equivalent links', async (t) => {
   const f = await fixture(t);
   f.audit.records.reverse();
@@ -80,7 +101,7 @@ for (const [name, mutate] of [
   ['audit issue', (a) => { a.issues.push({ type: 'bodyChanged', src: a.records[0].src, page: 1 }); }],
   ['missing image hash', (a) => { a.imageHashes = []; }],
   ['wrong image hash', (a) => { a.imageHashes[0].sha256 = '0'.repeat(64); }],
-  ['wrong identity', (a) => { a.meta.assetId = 'another-book'; }],
+  ['wrong identity', (a) => { a.meta.assetId = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'; }],
   ['wrong OPF hash', (a) => { a.meta.sourceOpfSha256 = '0'.repeat(64); }],
 ]) test(`live verification rejects ${name}`, async (t) => {
   const f = await fixture(t); mutate(f.audit);
@@ -138,7 +159,7 @@ test('failed restoration is reported as observation and does not erase completed
 for (const [name, options, expectedOk] of [
   ['verified volume 14 introduction', { volume: '14', assetId: '2d68797b1326483e9294e44696a80267' }, true],
   ['another book using p-001 for body text', {}, false],
-  ['same volume with another asset', { volume: '14', assetId: 'different-14-book' }, false],
+  ['same volume with another asset', { volume: '14', assetId: '14141414141414141414141414141414' }, false],
   ['same asset with another volume', { volume: '13', assetId: '2d68797b1326483e9294e44696a80267' }, false],
 ]) test(`official menu omission: ${name}`, async (t) => {
   const f = await fixture(t, options);

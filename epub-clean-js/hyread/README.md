@@ -20,7 +20,7 @@ node bin/cli.js hyread prepare --volume 14 --asset-id 2d68797b1326483e9294e44696
 
 prepare 按 OPF 清单下载资源并逐项检查。全部完成后才发布新的 `session.json`；返回 JSON 含 session 路径、资源目录和 Session。工作目录中的 `book-identity.json` 绑定书籍身份，不是 PID 锁。同书中断后可重试，其他书请用其他工作目录。强制终止可能留下未发布的 generation，它不参与当前 session；当前版本没有自动垃圾回收。
 
-`session.json` 记录卷号、assetId、书名、OPF SHA-256、manifest、spine、资源字节数/哈希，以及相对 `resourceRoot`。prepare/load 成功返回的 `config.resourcesDir` 和 `config.itemDir` 指向该 generation，不要写回旧的平铺 resources 路径。load、build 会重新检查整个资源集合；坏资源不能靠改 session 绕过。同书重新 prepare 可生成新的完整集合。
+`session.json` 记录卷号、32 位十六进制 assetId、书名、OPF SHA-256、manifest、spine、资源字节数/哈希，以及相对 `resourceRoot`。prepare/load 成功返回的 `config.resourcesDir` 和 `config.itemDir` 指向该 generation，不要写回旧的平铺 resources 路径。load、build 按 session 登记的字节数和 SHA-256 重新检查整个资源集合的一致性；session 本身可编辑，不是独立来源真实性证明。同书重新 prepare 可生成新的完整集合。`--session` 也可指定其他文件名，后续构建和接收会继续使用该文件绑定的 generation。
 
 ## 2. 在已有 Chrome 中采集
 
@@ -30,7 +30,7 @@ prepare 按 OPF 清单下载资源并逐项检查。全部完成后才发布新�
 node hyread/cli.mjs browser-script --session hyread/work/14/session.json --mode capture
 ```
 
-将输出交给浏览器工具的脚本执行入口。生成的表达式会安装 `window.__hyreadWorkflow` 并调用 `start`，开始逐章采集；返回的是状态摘要，不是整份正文。不要让工具把正文作为一个超大返回值取回。若工具的 sourcePath 因路径边界不可用，可以先读取已授权的脚本文本，再使用该工具支持的内联脚本入口。
+将输出交给 `chrome-devtools` 的 `evaluate_script`，显式指定 `format:'script'`。生成的表达式是已调用的 async IIFE，会安装 `window.__hyreadWorkflow` 并调用 `start`，开始逐章采集；返回的是状态摘要，不是整份正文。不要让工具把正文作为一个超大返回值取回。
 
 若需要本地脚本文件，用 Node 写入 UTF-8，避免 Shell 重定向改变编码：
 
@@ -43,6 +43,17 @@ const { stdout } = await promisify(execFile)(process.execPath, [
 ], { maxBuffer: 4 * 1024 * 1024 });
 await writeFile('hyread/work/14/capture-script.js', stdout, 'utf8');
 ```
+
+执行时从以下两种参数中选一种，`sourcePath` 和 `function` 不能同时传入：
+
+```js
+// 文件方式：pageId 是已核对的阅读器标签页，sourcePath 使用工具可读取的路径。
+{ pageId, format: 'script', sourcePath: '<capture-script.js 的绝对路径>' }
+// 内联方式：先读取已授权脚本；scriptText 是完整脚本文本。
+{ pageId, format: 'script', function: scriptText }
+```
+
+若 `sourcePath` 因工具路径边界不可用，使用上述内联方式。
 
 也可直接安装 `hyread/browser/capture-decrypted.js`，先调用 `describe()` 核对身份，再把本地 Session 对象传给 `start({mode:'capture',session})`。该文件只安装接口，不自动开始，也不点击下载链接。重复安装复用现有实例，运行中不能 clear 或再次 start。
 
@@ -68,7 +79,7 @@ window.__hyreadWorkflow.readChunk(0)
 // 按 exportInfo.chunkCount 依次或分批取 readChunk(index)
 ```
 
-exportInfo 是异步接口，返回 kind、assetId、OPF 哈希、UTF-8 总字节数、整份 SHA-256 和分块信息。readChunk 返回 `{sha256,index,offset,bytes,dataBase64}`，offset 是字节位置。chunkBytes 可按工具单次返回能力调整；12000 是默认值，不是工具能力上限。exportInfo 之后应保持同一分块视图，若要改大小，使用独立接收过程。
+exportInfo 是异步接口，返回 kind、assetId、OPF 哈希、UTF-8 总字节数、整份 SHA-256 和分块信息。readChunk 返回 `{sha256,index,offset,bytes,dataBase64}`，offset 是字节位置。chunkBytes 可按工具单次返回能力调整；12000 是默认值，不是工具能力上限。exportInfo 之后应保持同一分块视图；重试优先沿用原块大小。本地 `transfers/<kind>/<SHA>/info.json` 绑定该大小，更换进程或 info 输入文件名不会隔离接收状态。确需改大小时，使用独立 workDir/session 接收，不修改既有传输记录。
 
 把工具返回的纯 JSON 写入本地工作目录，再运行：
 
@@ -102,7 +113,9 @@ node hyread/cli.mjs verify --session hyread/work/14/session.json --epub "<成品
 
 默认输出为项目根（Node 工程上一级）下 `output/hyread/[三河ごーすと].义妹生活.<两位卷号>.[台繁].hyread.epub`，与 healed/translated/clean 同级。build 在独立 `epub_build/build-*` 目录组装，检查通过后发布成品。失败时保留原成品与本次诊断目录；不要删除原文件再重试。
 
-verify 默认把 JSON 和 Markdown 报告写到会话 `reports/` 下的唯一文件名，也可用 `--report <路径.json>` 指定；不同内容不能覆盖已有报告。失败检查返回非零。没有 audit 时 live=not-run；`--require-live` 在缺少实时复核时必须失败。报告中的 semantic 始终为 not-run。这里的 XML、资源、正文与引用检查不是官方 EPUBCheck；没有运行官方 EPUBCheck 时，应写“官方 EPUBCheck 未运行”，不能沿用通用“0 错误”保证。
+verify 默认把 JSON 和 Markdown 报告写到会话 `reports/` 下的唯一文件名，也可用 `--report <路径.json>` 指定；不同内容不能覆盖已有报告。顶层 `checks` 和逐文档检查都按实际执行阶段记录状态：`passed` 表示已完成且满足检查条件，`failed` 表示发现不符合，`not-run` 表示未执行或缺乏执行所需证据。某文档 capture 解析失败时，该文档 capture=failed，依赖它的 live 比较为 not-run；顶层 live 也不会将未完成项算作全部通过。
+
+任一检查 failed 时 `report.ok=false`，CLI 返回非零。没有 audit 时 live=not-run；默认允许其余检查通过后 `report.ok=true`、退出 0，指定 `--require-live` 则要求 live=passed，否则即使仍是 not-run，也会 `report.ok=false`、退出非零。semantic 始终为 not-run，退出 0 不表示语义已自动审阅。这里的 XML、资源、正文与引用检查不是官方 EPUBCheck；没有运行官方 EPUBCheck 时，应写“官方 EPUBCheck 未运行”，不能沿用通用“0 错误”保证。
 
 实时复核需要重新从原始阅读器目录进入、逐章翻至末页并读取当次正文与图片哈希，不能把旧 grab 当成 audit：
 
@@ -168,5 +181,9 @@ hyread/work/<卷>/                 # Git ignored，不提交真实书籍/正文/
 - 仅第 08 卷既有精确修正规则在匹配卷号、assetId、路径时应用并列入报告；其他语义疑点不自动改字。
 
 本次第 14 卷运行记录为 32 文档、22 侧栏目录项、135 分页、2896 叶块、13 ruby、22 图/7 CSS；旧人工模型曾记 2882 文本块。数字反映当次窗口、字号和块模型，不是算法常量，也不能作为其他书的验收期望。
+
+本次 CLI 复用检查还观察到：同一 `p-cover.xhtml` 连续两次 HTTP 200 响应均为 704 字节，起始不是 XML，SHA-256 不同；重新 prepare 的 33 份原始 XHTML 长度与原会话相同、哈希均不同，OPF 和 22 图/7 CSS 的字节哈希一致。这些跨请求的原始二进制哈希变化，不能证明明文丢失，也不能证明没有丢失；每个 generation 保存的本地资源仍须严格匹配该 session 的字节数和哈希。
+
+CLI 复用已有 capture/audit 时，正文结论来自它们记录时间的浏览器采集与复核，并结合书籍身份、OPF、正文及图片/CSS 检查。它不能证明未来阅读器内容没有更新；之后内容有变化时须重新采集、复核。本段只记录此前观察，不代表本轮修复后的浏览器实测已经完成。
 
 `node hyread/cli.mjs --help` 列出全部命令；各命令支持 --help。`npm run test:hyread` 使用合成资源与真实 CLI 子进程，不请求 HyRead，不依赖 work/13 或真实书籍。

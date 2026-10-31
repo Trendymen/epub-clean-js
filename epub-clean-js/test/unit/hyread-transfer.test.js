@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, rename } from 'node:fs/promises';
+import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { createHyreadFixture, absoluteHyreadCapture } from '../helpers/hyread-fixtures.mjs';
-import { prepareSession } from '../../hyread/lib/session.mjs';
+import { prepareSession, loadSession } from '../../hyread/lib/session.mjs';
 import { receiveChunk, finalizeTransfer } from '../../hyread/lib/transfer.mjs';
 import { validateCapture, validateAuditEnvelope } from '../../hyread/lib/artifacts.mjs';
 
@@ -36,12 +37,27 @@ test('out-of-order chunks preserve UTF-8 emoji and allow identical retry after p
   assert.equal((await finalizeTransfer(f.config, tx.info)).reused, true);
 });
 
+for (const anotherGeneration of [false, true]) test(`B1: receive and finalize keep selected session with default ${anotherGeneration ? 'at another generation' : 'absent'}`, async (t) => {
+  const f = await fixture(t), tx = transfer(f);
+  const selected = join(f.config.workDir, 'selected-snapshot.json');
+  await rename(f.config.sessionPath, selected);
+  if (anotherGeneration) {
+    f.resources['standard.opf'] = Buffer.from(f.opf.toString().replace('<metadata/>', '<metadata><title>new generation</title></metadata>'));
+    const next = await prepareSession(f.config, { fetchImpl: f.fetchImpl });
+    assert.notEqual(next.session.sourceOpfSha256, f.session.sourceOpfSha256);
+  }
+  const { config } = await loadSession(selected);
+  for (const chunk of tx.chunks) await receiveChunk(config, tx.info, chunk);
+  const result = await finalizeTransfer(config, tx.info);
+  assert.deepEqual(await readFile(result.path), tx.bytes);
+});
+
 test('chunk metadata, strict base64 and conflicting retries cannot overwrite accepted chunks', async (t) => {
   const f = await fixture(t), tx = transfer(f), first = tx.chunks[0];
   for (const change of [{ index: -1 }, { index: tx.info.chunkCount }, { offset: 1 }, { bytes: 1 }, { sha256: '0'.repeat(64) }, { dataBase64: first.dataBase64 + '\n' }, { dataBase64: '!!!!' }]) {
     await assert.rejects(receiveChunk(f.config, tx.info, { ...first, ...change }));
   }
-  for (const change of [{ assetId: 'other-book' }, { sourceOpfSha256: '0'.repeat(64) }, { chunkCount: 0 }, { byteLength: 0 }, { chunkBytes: 1.5 }, { kind: '../capture' }]) {
+  for (const change of [{ assetId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }, { sourceOpfSha256: '0'.repeat(64) }, { chunkCount: 0 }, { byteLength: 0 }, { chunkBytes: 1.5 }, { kind: '../capture' }]) {
     await assert.rejects(receiveChunk(f.config, { ...tx.info, ...change }, first));
   }
   await receiveChunk(f.config, tx.info, first);
@@ -79,7 +95,7 @@ test('capture accepts old metadata-free format and reordered mapping keys, rejec
   const f = await fixture(t);
   assert.doesNotThrow(() => validateCapture(f.capture, f.session));
   assert.doesNotThrow(() => validateCapture({ ...f.capture, meta: f.meta, data: Object.fromEntries(Object.entries(f.capture.data).reverse()) }, f.session));
-  for (const capture of [{ ...f.capture, order: [...f.capture.order].reverse() }, { ...f.capture, order: f.capture.order.slice(1) }, { ...f.capture, order: f.capture.order.map((s) => s.replace(f.session.assetId, 'wrong')) }, { ...f.capture, meta: { ...f.meta, title: '错书' } }, { ...f.capture, meta: { ...f.meta, restoration: null } }, { ...f.capture, meta: { ...f.meta, sourceOpfSha256: '0'.repeat(64) } }, { ...f.capture, data: { ...f.capture.data, [f.config.itemBase + '../escape.xhtml']: '<html/>' } }]) assert.throws(() => validateCapture(capture, f.session));
+  for (const capture of [{ ...f.capture, order: [...f.capture.order].reverse() }, { ...f.capture, order: f.capture.order.slice(1) }, { ...f.capture, order: f.capture.order.map((s) => s.replace(f.session.assetId, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')) }, { ...f.capture, meta: { ...f.meta, title: '错书' } }, { ...f.capture, meta: { ...f.meta, restoration: null } }, { ...f.capture, meta: { ...f.meta, sourceOpfSha256: '0'.repeat(64) } }, { ...f.capture, data: { ...f.capture.data, [f.config.itemBase + '../escape.xhtml']: '<html/>' } }]) assert.throws(() => validateCapture(capture, f.session));
 });
 
 test('audit envelope checks required observations and spine identity while accepting visit order', async (t) => {

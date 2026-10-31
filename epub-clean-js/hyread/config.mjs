@@ -41,7 +41,7 @@ export function resolveHyreadConfig(options = {}) {
   const normalizedVolume = String(Number(volume)).padStart(2, '0');
   const assetId = options.assetId ?? ASSET_ID;
   const title = options.title ?? BOOK_TITLE;
-  if (typeof assetId !== 'string' || !/^[A-Za-z0-9_-]+$/.test(assetId)) throw new Error('Invalid assetId');
+  if (typeof assetId !== 'string' || !/^[a-f0-9]{32}$/i.test(assetId)) throw new Error('Invalid assetId');
   if (typeof title !== 'string' || !title.trim() || /[\u0000-\u001f\u007f]/.test(title)) throw new Error('Invalid title');
   const projectRoot = resolve(options.projectRoot ?? PROJECT_ROOT);
   const workDir = resolve(options.workDir ?? join(HYREAD_DIR, 'work', normalizedVolume));

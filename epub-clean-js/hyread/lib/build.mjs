@@ -204,9 +204,7 @@ export function classifyValidatorReferences(entries, brokenLinks, dependencyRefe
       for (const reference of dependencyReferences.get(name) ?? []) {
         if (reference === value) { hasDependency = true; break; }
         try {
-          const actual = new URL(reference, `https://epub.invalid/${name}`), candidate = new URL(value, `https://epub.invalid/${name}`);
-          actual.hash = ''; candidate.hash = '';
-          if (decodeURI(actual.href) === decodeURI(candidate.href)) { hasDependency = true; break; }
+          if (resolveReference(reference, name).path === resolveReference(value, name).path) { hasDependency = true; break; }
         } catch { hasDependency = true; break; }
       }
       if (!span || hasDependency) active.add(report);
