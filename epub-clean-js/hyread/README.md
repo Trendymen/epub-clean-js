@@ -21,8 +21,8 @@
 | 1（可选） | `scripts/1-download-page-resources.mjs` | Node | 归档阅读器运行时（onlineReader.js / wasm 等），做 EPUB 非必需 |
 | 2（必需） | `scripts/2-download-epub-content.mjs` | Node | 按 OPF 下载全卷内容：`standard.opf` + 加密 xhtml + css + image |
 | 3（必需） | `browser/capture-decrypted.js` | **浏览器 Console** | 驱动阅读器逐章翻页，`XMLSerializer` 抓解密正文，下载 `grab_xml.json` |
-| 4a（可选） | `scripts/3-extract-decrypted.mjs` | Node | 把解密正文导出成独立 xhtml 文件夹（查阅用） |
-| 4b（必需） | `scripts/4-build-epub.mjs` | Node | 清理 + 分类注入 CSS + 去 DRM + 生成 nav，`yazl` 打包成 `.epub` |
+| 4a（可选） | `scripts/3-extract-decrypted.mjs` | Node | 把解析后正文导出成独立 xhtml 文件夹（查阅用） |
+| 4b（必需） | `scripts/4-build-epub.mjs` | Node | 清理 + 分类注入 CSS + 生成 nav，`yazl` 打包成 `.epub` |
 
 ## 使用步骤
 
@@ -83,7 +83,7 @@ hyread/
 
 - **正文消失 / 只剩插图**：`fixed-layout-jp.css` 含 `body{font-size:0}`，只能给 svg 图片页用；正文页注入它会把文字压成 0 号字。`4-build-epub.mjs` 按"含 svg = 图片页"分类注入 CSS。
 - **epubcheck RSC-005**：阅读器注入的 `<style xmlns="">` 在空命名空间，违反 XHTML head 内容模型 → 清理时按 `xmlns=""` 整块移除。
-- **epubcheck OPF-027**：OPF 里 HyRead 的 `<meta property="hdf">` 是 DRM 元数据、非标准属性 → 移除。
+- **epubcheck OPF-027**：OPF 里 HyRead 的 `<meta property="hdf">` 是元数据、非标准属性 → 移除。
 - **良构**：步骤 3 用 `XMLSerializer`（非 `outerHTML`）抓取，空元素自闭合、实体正确，xmllint/epubcheck 通过。
 - **nav 不是字节级真本**：`navigation-documents.xhtml` 加密且不在 spine 无法解密，nav 由解密正文的官方目录重建，内容等价。
 
