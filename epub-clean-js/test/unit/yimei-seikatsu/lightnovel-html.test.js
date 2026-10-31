@@ -16,7 +16,7 @@ import {
 } from '../../../books/yimei-seikatsu/lightnovel-html/index.js';
 import { rubyAnnotationsForVolume } from '../../../src/entries/lightnovel-html-simple-batch.js';
 import { readEpub, writeEpub } from '../../../src/core/zip-io.js';
-import { parseHyreadEpubToBook } from '../../../books/yimei-seikatsu/hyread-parser.js';
+import { parseHyreadEpubToBook, parseAnotherDaysEpubToBook } from '../../../books/yimei-seikatsu/hyread-parser.js';
 import { writeHyreadFixture, bodyParagraph as hyreadP } from '../../helpers/hyread-fixture.js';
 
 test('HyRead renders native ruby in chapters, preface and afterword without annotating ordinary matches', async () => {
@@ -52,6 +52,54 @@ test('HyRead renders native ruby in chapters, preface and afterword without anno
     assert.match(pre, /前言注解/);
     const afterword = epub.entries['OEBPS/Text/chapter0002.xhtml'].toString('utf8');
     assert.match(afterword, /<ruby>感谢<rt>Thank You<\/rt><\/ruby>/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('HyRead renders paired ruby and ruby inside inline footnotes with escaped readings and a plain fallback', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-hyread-note-ruby-'));
+  try {
+    const source = join(dir, 'source.epub');
+    const ref = join(dir, 'ref.epub');
+    const out = join(dir, 'out.epub');
+    await writeHyreadFixture(source, { pages: {
+      'p-002.xhtml': hyreadP('<ruby><rb>東</rb><rt>east</rt><rb>京</rb><rt>capital</rt></ruby>正文（註：即<ruby>水星<rt>Mercury &amp; &lt;script&gt;</rt></ruby>的讀音）結尾'),
+    } });
+    await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
+    const book = await parseHyreadEpubToBook(source, { volume: '13' });
+    await buildLightNovelEpubFromBook(book, { sourceImages: book._sourceImages, refEpubPath: ref, outEpubPath: out, includeSpecials: false });
+    const epub = await readEpub(out);
+    const chapter = epub.entries['OEBPS/Text/chapter0001.xhtml'].toString('utf8');
+    assert.match(chapter, /<ruby>东<rt>east<\/rt><\/ruby><ruby>京<rt>capital<\/rt><\/ruby>正文/);
+    assert.match(chapter, /<aside\b[\s\S]*?<p>即<ruby>水星<rt>Mercury &amp; &lt;script&gt;<\/rt><\/ruby>的读音<\/p>/);
+    assert.match(chapter, /zy-footnote="即水星（Mercury &amp; &lt;script&gt;）的读音"/);
+    assert.doesNotMatch(chapter, /<script>/);
+    assert.match(chapter, /<\/sub>结尾<\/p>/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('another-days parser preserves English spacing and builder locates compact fixed footnote anchors', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-another-days-spaced-anchor-'));
+  try {
+    const source = join(dir, 'source.epub');
+    const ref = join(dir, 'ref.epub');
+    const out = join(dir, 'out.epub');
+    const pages = Object.fromEntries(Array.from({ length: 15 }, (_, i) => [`p-${String(i + 1).padStart(3, '0')}.xhtml`, '<p>佔位。</p>']));
+    const paragraphs = Array.from({ length: 768 }, () => '<p>佔位。</p>');
+    paragraphs[702] = '<p>引用 Man reist ja nicht, um anzukommen, sondern um zu reisen.，後文仍在。</p>';
+    paragraphs[767] = '<p>書名 Endless Night，後文仍在。</p>';
+    pages['p-015.xhtml'] = paragraphs.join('');
+    await writeHyreadFixture(source, { pages, toc: Object.keys(pages).map((name, i) => [name, `第${i + 1}章`]) });
+    await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
+    const book = await parseAnotherDaysEpubToBook(source);
+    await buildLightNovelEpubFromBook(book, { sourceImages: book._sourceImages, refEpubPath: ref, outEpubPath: out, includeSpecials: false });
+    const epub = await readEpub(out);
+    const chapter = epub.entries['OEBPS/Text/chapter0015.xhtml'].toString('utf8');
+    assert.match(chapter, /Man reist ja nicht, um anzukommen, sondern um zu reisen\.<sub><a\b[^>]*>[\s\S]*?<\/a><\/sub>，后文仍在。<\/p>/);
+    assert.match(chapter, /Endless Night<sub><a\b[^>]*>[\s\S]*?<\/a><\/sub>，后文仍在。<\/p>/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

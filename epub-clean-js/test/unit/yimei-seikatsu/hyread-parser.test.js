@@ -71,3 +71,35 @@ test('another-days keeps illustration pairing and spine order when sharing inlin
     assert.equal(book.chapters[1].blocks[1].rubySpans[0].rt, 'Asamura');
   }, parseAnotherDaysEpubToBook);
 });
+
+test('HyRead simplifies continuous Chinese context across span and ruby boundaries while mapping UTF-16 positions', async () => {
+  await withFixture({ pages: { 'p-002.xhtml': p('乾<span>坤</span>、著<span>作</span>、乾<ruby>隆<rt>皇帝</rt></ruby>、二<ruby>噁<rt>惡</rt></ruby>英') } }, (book) => {
+    const block = book.chapters[0].blocks[0];
+    assert.equal(block.text, '乾坤、著作、乾隆、二𫫇英');
+    assert.deepEqual(block.rubySpans, [
+      { start: 7, end: 8, base: '隆', rt: '皇帝' },
+      { start: 10, end: 12, base: '𫫇', rt: '恶' },
+    ]);
+    for (const span of block.rubySpans) assert.equal(block.text.slice(span.start, span.end), span.base);
+  });
+});
+
+test('HyRead retains each rb/rt pairing within a ruby and converts their shared Chinese context', async () => {
+  await withFixture({ pages: { 'p-002.xhtml': p('<ruby><rb>東</rb><rt>east</rt><rb>京</rb><rt>capital</rt></ruby>與<ruby><rb>乾</rb><rt>qian</rt><rb>隆</rb><rt>long</rt></ruby>') } }, (book) => {
+    const block = book.chapters[0].blocks[0];
+    assert.equal(block.text, '东京与乾隆');
+    assert.deepEqual(block.rubySpans, [
+      { start: 0, end: 1, base: '东', rt: 'east' },
+      { start: 1, end: 2, base: '京', rt: 'capital' },
+      { start: 3, end: 4, base: '乾', rt: 'qian' },
+      { start: 4, end: 5, base: '隆', rt: 'long' },
+    ]);
+  });
+});
+
+test('another-days retains mfont large-text decoration after the chapter heading', async () => {
+  await withFixture({ pages: { 'p-002.xhtml': '<p class="mfont"><span class="font-1em40">第一章</span></p><p>正文</p><p class="mfont"><span class="font-1em40">告別</span></p><p>後文</p>' } }, (book) => {
+    assert.equal(book.chapters[0].title, '第一章');
+    assert.deepEqual(book.chapters[0].blocks.map((block) => block.text), ['正文', '告别', '后文']);
+  }, parseAnotherDaysEpubToBook);
+});

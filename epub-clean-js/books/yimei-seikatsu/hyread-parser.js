@@ -96,7 +96,7 @@ function inlinePlainText(node) {
 }
 
 function normalizeInlineText(text) {
-  return simplifyText(text).replace(/[ \t\r\n\u00a0]+/g, ' ');
+  return text.replace(/[ \t\r\n\u00a0]+/g, ' ');
 }
 
 // rubySpans 使用简化后 text 的 UTF-16 偏移；空数组也表示正文已按源结构解析，不用字符串回退。
@@ -108,18 +108,41 @@ function buildInlineBlock(pEl) {
     if (text.endsWith(' ') && part.startsWith(' ')) part = part.slice(1);
     text += part;
   };
+  const walkRuby = (ruby) => {
+    const pending = [];
+    const appendBase = (value, explicit = false) => {
+      const part = normalizeInlineText(value);
+      const previous = pending.at(-1);
+      if (!part.trim() && (!previous || previous.explicit)) return;
+      const start = text.length;
+      append(part);
+      if (!explicit && previous && !previous.explicit) previous.end = text.length;
+      else pending.push({ start, end: text.length, explicit });
+    };
+    const walk = (node) => {
+      for (const child of node.childNodes) {
+        if (child.nodeType === 3) { appendBase(child.textContent || ''); continue; }
+        if (child.nodeType !== 1) continue;
+        const tag = (child.localName || '').toLowerCase();
+        if (tag === 'rp') continue;
+        if (tag === 'rt') {
+          const base = pending.shift();
+          const rt = simplifyText(normalizeInlineText(child.textContent || '').trim());
+          if (base && rt) rubySpans.push({ start: base.start, end: base.end, rt });
+        } else if (tag === 'rb') appendBase(inlinePlainText(child), true);
+        else if (tag === 'img') appendBase(inlinePlainText(child));
+        else if (tag !== 'br') walk(child);
+      }
+    };
+    walk(ruby);
+  };
   const walk = (node) => {
     for (const c of node.childNodes) {
       if (c.nodeType === 3) { append(c.textContent || ''); continue; }
       if (c.nodeType !== 1) continue;
       const tag = (c.localName || c.tagName || '').toLowerCase();
       if (tag === 'ruby') {
-        const base = normalizeInlineText(inlinePlainText(c));
-        const rt = Array.from(c.querySelectorAll('rt'))
-          .map((el) => normalizeInlineText(el.textContent || '').trim()).join(' ');
-        const start = text.length;
-        text += base;
-        if (base && rt) rubySpans.push({ start, end: text.length, base, rt });
+        walkRuby(c);
       } else if (tag === 'img') {
         append(inlinePlainText(c));
       } else if (tag !== 'br' && tag !== 'rt' && tag !== 'rp') {
@@ -129,26 +152,40 @@ function buildInlineBlock(pEl) {
   };
   walk(pEl);
   const leading = text.length - text.trimStart().length;
-  text = text.trim();
+  const original = text.trim();
+  text = simplifyText(original);
+  const sourcePoints = Array.from(original);
+  const convertedPoints = Array.from(text);
+  // tw→cn 逐码点替换；UTF-16 宽度可能变化（如「噁」在「二噁英」中转成「𫫇」）。
+  if (sourcePoints.length !== convertedPoints.length) throw new Error('Cannot map ruby positions after Chinese conversion');
+  const offsets = new Map([[0, 0]]);
+  let sourceOffset = 0;
+  let convertedOffset = 0;
+  for (let i = 0; i < sourcePoints.length; i += 1) {
+    sourceOffset += sourcePoints[i].length;
+    convertedOffset += convertedPoints[i].length;
+    offsets.set(sourceOffset, convertedOffset);
+  }
   return {
     type: 'text', text, bold: false,
     rubySpans: rubySpans.map((span) => {
-      const start = Math.max(0, span.start - leading);
-      const end = Math.min(text.length, span.end - leading);
+      const start = offsets.get(Math.max(0, span.start - leading));
+      const end = offsets.get(Math.min(original.length, span.end - leading));
       return { start, end, base: text.slice(start, end), rt: span.rt };
     }).filter((span) => span.end > span.start),
   };
+}
+
+function headingStyleNodes(element) {
+  return [element, ...element.querySelectorAll('[class]')].filter((node) =>
+    (node.getAttribute('class') || '').split(/\s+/).some((token) => token === 'font-1em40' || token === 'gfont40'));
 }
 
 function isStandaloneHeading(element, blocks) {
   if (blocks.some((block) => block.type === 'text')) return false;
   const text = inlinePlainText(element).replace(/\s+/g, '');
   if (!text) return false;
-  return [element, ...element.querySelectorAll('[class]')].some((node) => {
-    const tokens = (node.getAttribute('class') || '').split(/\s+/);
-    return tokens.some((token) => token === 'font-1em40' || token === 'gfont40')
-      && inlinePlainText(node).replace(/\s+/g, '') === text;
-  });
+  return headingStyleNodes(element).some((node) => inlinePlainText(node).replace(/\s+/g, '') === text);
 }
 
 function parseChapterXhtml(xhtml) {
@@ -262,7 +299,7 @@ function parseAnotherDaysChapterXhtml(xhtml) {
 
       const cls = child.getAttribute('class') || '';
       // mfont 段是标记/空段（如 font-1em10 小字标记），readmoo 正文段是 moofs*/moolh*
-      if (/\bmfont\b/.test(cls) && !isStandaloneHeading(child, blocks)) continue;
+      if (/\bmfont\b/.test(cls) && headingStyleNodes(child).length === 0) continue;
 
       const text = (child.textContent || '').trim();
       if (/^[　\s]*$/.test(text) && child.querySelector('br')) continue;

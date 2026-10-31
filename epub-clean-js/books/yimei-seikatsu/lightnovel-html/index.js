@@ -152,9 +152,10 @@ function renderImageDiv(image, className = 'kuchie') {
  </div>`;
 }
 
-function buildRenderedFootnote(body, state) {
+function buildRenderedFootnote(body, state, renderedBody = null) {
   const [refHtml, asideHtml] = buildSteraFootnote({ body }, state.counter, { iconRegular: 'note.png' });
-  state.asides.push(asideHtml);
+  state.asides.push(renderedBody === null ? asideHtml
+    : asideHtml.replace(/<p>[\s\S]*?<\/p>/, () => `<p>${renderedBody}</p>`));
   state.counter += 1;
   return refHtml;
 }
@@ -165,13 +166,22 @@ function resolveFixedFootnoteOffset(text, note) {
   }
   if (typeof note.anchor !== 'string' || note.anchor.length === 0) return text.length;
 
+  const anchor = note.anchor.replace(/\s/g, '');
+  if (!anchor) return text.length;
+  let compact = '';
+  const originalEnds = [];
+  for (let i = 0; i < text.length; i += 1) {
+    if (/\s/.test(text[i])) continue;
+    compact += text[i];
+    originalEnds.push(i + 1);
+  }
   let from = 0;
   const occurrence = Math.max(1, note.occurrence || 1);
   for (let i = 0; i < occurrence; i += 1) {
-    const pos = text.indexOf(note.anchor, from);
+    const pos = compact.indexOf(anchor, from);
     if (pos < 0) return text.length;
-    if (i === occurrence - 1) return pos + note.anchor.length;
-    from = pos + note.anchor.length;
+    if (i === occurrence - 1) return originalEnds[pos + anchor.length - 1];
+    from = pos + anchor.length;
   }
   return text.length;
 }
@@ -182,11 +192,14 @@ function collectNoteEvents(text, fixedFootnotes = []) {
   let match;
   INLINE_NOTE_RE.lastIndex = 0;
   while ((match = INLINE_NOTE_RE.exec(text)) !== null) {
+    const bodyEnd = match.index + match[0].length - 1;
     events.push({
       type: 'inline',
       start: match.index,
       end: match.index + match[0].length,
       body: normalizeText(match[1]),
+      bodyStart: bodyEnd - match[1].length,
+      bodyEnd,
       order: order += 1,
     });
   }
@@ -210,17 +223,19 @@ function collectNoteEvents(text, fixedFootnotes = []) {
 // 把单个段落文本里的台版内联注释与固定迁移注释替换成 duokan-footnote 引用锚点，
 // 注释正文累积到 state.asides，编号由 state.counter 递增（每章重置）。
 function renderParagraphWithNotes(text, state, fixedFootnotes = [], rubySpans = null) {
-  const renderText = (start, end) => {
-    if (!rubySpans) return renderRubyAnnotations(text.slice(start, end), state?.rubyAnnotations || []);
+  const renderText = (start, end, plain = false) => {
+    if (!rubySpans) return plain ? text.slice(start, end)
+      : renderRubyAnnotations(text.slice(start, end), state?.rubyAnnotations || []);
     let html = '';
     let cursor = start;
     for (const span of rubySpans) {
       if (span.start < start || span.end > end) continue;
-      html += escapeXml(text.slice(cursor, span.start));
-      html += `<ruby>${escapeXml(span.base)}<rt>${escapeXml(span.rt)}</rt></ruby>`;
+      html += plain ? text.slice(cursor, span.start) : escapeXml(text.slice(cursor, span.start));
+      html += plain ? `${span.base}（${span.rt}）`
+        : `<ruby>${escapeXml(span.base)}<rt>${escapeXml(span.rt)}</rt></ruby>`;
       cursor = span.end;
     }
-    return html + escapeXml(text.slice(cursor, end));
+    return html + (plain ? text.slice(cursor, end) : escapeXml(text.slice(cursor, end)));
   };
   if (!state) return renderText(0, text.length);
   let html = '';
@@ -228,7 +243,12 @@ function renderParagraphWithNotes(text, state, fixedFootnotes = [], rubySpans = 
   for (const event of collectNoteEvents(text, fixedFootnotes)) {
     if (event.start < lastIndex) continue;
     html += renderText(lastIndex, event.start);
-    html += buildRenderedFootnote(event.body, state);
+    const hasNoteRuby = event.type === 'inline' && rubySpans?.some((span) =>
+      span.start >= event.bodyStart && span.end <= event.bodyEnd);
+    html += hasNoteRuby
+      ? buildRenderedFootnote(normalizeText(renderText(event.bodyStart, event.bodyEnd, true)), state,
+        renderText(event.bodyStart, event.bodyEnd))
+      : buildRenderedFootnote(event.body, state);
     lastIndex = event.end;
   }
   html += renderText(lastIndex, text.length);
