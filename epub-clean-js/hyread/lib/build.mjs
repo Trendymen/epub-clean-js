@@ -5,11 +5,12 @@ import { DOMParser } from 'linkedom';
 import { XMLParser } from 'fast-xml-parser';
 import { readEpub, writeEpub } from '../../src/core/zip-io.js';
 import { validateOutput } from '../../src/core/validator.js';
+import { XHTML_ATTR_RE } from '../../src/core/patchers.js';
 import { loadSession, validateSession } from './session.mjs';
 import { safeJoin, safeRelativePath } from './paths.mjs';
 import { validateCapture, itemBaseFor, resourceHref } from './artifacts.mjs';
 import { inspectXhtml, normalizeText, applyApprovedCorrections } from './content.mjs';
-import { cssReferences, assertWellFormedXml } from './syntax.mjs';
+import { cssReferences, assertWellFormedXml, xmlMarkupTokens } from './syntax.mjs';
 
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const escapeXml = (text) => String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;').replace(/>/g, '&gt;');
@@ -45,20 +46,39 @@ function stylesheetTarget(value, name, session) {
 }
 
 function cleanXhtml(html, href, session, entries) {
-  html = html.replace(/<base\b[^>]*\/?\s*>/gi, '')
-    .replace(/<link\b(?=[^>]*\bhref\s*=\s*(["'])blob:[\s\S]*?\1)[^>]*\/?\s*>/gi, '')
-    .replace(/<style\b(?=[^>]*\bxmlns\s*=\s*(["'])\1)[^>]*>[\s\S]*?<\/style>/gi, '')
-    .replace(/(<(?:html|body)\b[^>]*?)\s+style\s*=\s*(["'])[\s\S]*?\2/gi, '$1')
-    .replace(/(<div\b(?=[^>]*\bclass\s*=\s*(["'])main\2)[^>]*?)\s+style\s*=\s*(["'])[\s\S]*?\3/gi, '$1');
-  const imageOnly = /<svg[\s>]/i.test(html) && !inspectXhtml(html).bodyText;
-  let removed = false;
-  if (!imageOnly) html = html.replace(/<link\b[^>]*\/?\s*>/gi, (tag) => {
-    const node = new DOMParser().parseFromString(tag, 'text/html').querySelector('link');
-    if (node && (node.getAttribute('rel') ?? '').toLowerCase().split(/\s+/).includes('stylesheet') && node.hasAttribute('href') && imageStylesheet(stylesheetTarget(node.getAttribute('href'), `item/${href}`, session), entries)) {
-      removed = true; return '';
+  assertWellFormedXml(html);
+  const tokens = xmlMarkupTokens(html), stack = [], ends = new Map(), edits = [];
+  for (const token of tokens) {
+    if (token.type === 'open') {
+      if (token.selfClosing) ends.set(token.start, token.end);
+      else stack.push(token);
+    } else if (token.type === 'close') ends.set(stack.pop().start, token.end);
+  }
+  const imageOnly = tokens.some((token) => token.type === 'open' && token.name.toLowerCase() === 'svg') && !inspectXhtml(html).bodyText;
+  let removed = false, skipUntil = -1;
+  for (const token of tokens) {
+    if (token.type !== 'open' || token.start < skipUntil) continue;
+    const tag = token.name.toLowerCase(), attributes = new Map(token.attributes.map((attribute) => [attribute.name, attribute]));
+    const source = attributes.get('href')?.value;
+    let remove = tag === 'base' || (tag === 'link' && source?.startsWith('blob:')) || (tag === 'style' && attributes.get('xmlns')?.value === '');
+    if (!remove && !imageOnly && tag === 'link' && source && (attributes.get('rel')?.value ?? '').toLowerCase().split(/\s+/).includes('stylesheet') && imageStylesheet(stylesheetTarget(source, `item/${href}`, session), entries)) {
+      remove = true; removed = true;
     }
-    return tag;
-  });
+    if (remove) {
+      skipUntil = ends.get(token.start); edits.push({ start: token.start, end: skipUntil, value: '' }); continue;
+    }
+    for (const attribute of token.attributes) {
+      if (attribute.name === 'style' && (tag === 'html' || tag === 'body' || (tag === 'div' && attributes.get('class')?.value === 'main'))) edits.push({ ...attribute, value: '' });
+      else if (['src', 'href', 'xlink:href'].includes(attribute.name) && attribute.value.startsWith(itemBaseFor(session))) {
+        const url = new URL(attribute.value);
+        if (url.search) throw new Error('Query in same-book resource dependency');
+        const target = resourceHref(url.href.split('#')[0], session);
+        const value = (posix.relative(posix.dirname(href), target) || posix.basename(target)) + url.hash;
+        edits.push({ ...attribute, value: `${attribute.name}=${attribute.quote}${escapeXml(value).replace(/'/g, '&apos;')}${attribute.quote}` });
+      }
+    }
+  }
+  for (const edit of edits.sort((a, b) => b.start - a.start)) html = html.slice(0, edit.start) + edit.value + html.slice(edit.end);
   const document = new DOMParser().parseFromString(html, 'text/html');
   const existing = new Set(Array.from(document.querySelectorAll('link[href]'), (node) => new URL(node.getAttribute('href'), itemBaseFor(session) + href).href));
   const candidates = (imageOnly ? CSS_IMG : CSS_TEXT).map((name) => session.manifest.find((item) => item.mediaType === 'text/css' && posix.basename(item.href) === name)).filter(Boolean);
@@ -66,16 +86,16 @@ function cleanXhtml(html, href, session, entries) {
   const links = css.filter((item) => !existing.has(itemBaseFor(session) + item.href)).map((item) => `<link rel="stylesheet" type="text/css" href="${escapeXml(posix.relative(posix.dirname(href), item.href))}"/>`).join('\n');
   const hasExisting = Array.from(document.querySelectorAll('link[href]')).some((node) => (node.getAttribute('rel') ?? '').toLowerCase().split(/\s+/).includes('stylesheet'));
   if (!imageOnly && (removed || candidates.length) && !hasExisting && !links) throw new Error(`No safe text stylesheet after removing image-only CSS dependency: ${href}`);
-  if (links) html = html.replace(/<\/head>/i, `${links}\n</head>`);
-  const base = itemBaseFor(session);
-  html = html.replace(/\b(src|href|xlink:href)\s*=\s*(["'])(.*?)\2/gi, (whole, attr, quote, value) => {
-    if (!value.startsWith(base)) return whole;
-    const url = new URL(value);
-    if (url.search) throw new Error('Query in same-book resource dependency');
-    const target = resourceHref(url.href.split('#')[0], session);
-    return `${attr}=${quote}${escapeXml(posix.relative(posix.dirname(href), target) || posix.basename(target))}${url.hash}${quote}`;
-  });
-  if (!/^\s*<\?xml\b/.test(html)) html = '<?xml version="1.0" encoding="UTF-8"?>\n' + (/<!DOCTYPE\b/i.test(html) ? '' : '<!DOCTYPE html>\n') + html;
+  const cleanedTokens = xmlMarkupTokens(html);
+  if (links) {
+    const head = cleanedTokens.find((token) => token.type === 'close' && token.name.toLowerCase() === 'head');
+    if (!head) throw new Error('XHTML has no head for stylesheets');
+    html = html.slice(0, head.start) + links + '\n' + html.slice(head.start);
+  }
+  if (!tokens.some((token) => token.type === 'pi' && /^xml(?:[ \t\r\n]|$)/.test(token.value))) {
+    const declaration = '<?xml version="1.0" encoding="UTF-8"?>\n' + (tokens.some((token) => token.type === 'doctype') ? '' : '<!DOCTYPE html>\n');
+    html = html.startsWith('\ufeff') ? '\ufeff' + declaration + html.slice(1) : declaration + html;
+  }
   return html;
 }
 
@@ -122,7 +142,9 @@ function bodyWithImagePositions(html, src) {
 
 function inspectDependencies(name, text, entries, issues) {
   const styles = name.endsWith('.css') ? [text] : [];
+  const references = new Set();
   const check = (value, hyperlink = false) => {
+    if (value) references.add(value);
     if (!value || value.startsWith('data:') || (hyperlink && /^(?:https?:|mailto:|tel:)/i.test(value))) return;
     try {
       const target = resolveReference(value, name);
@@ -153,6 +175,7 @@ function inspectDependencies(name, text, entries, issues) {
     try { for (const value of cssReferences(style).urls) check(value); }
     catch (error) { issues.push(`${name}: ${error.message}`); }
   }
+  return references;
 }
 
 function checkTextStyles(html, name, entries, issues) {
@@ -164,19 +187,58 @@ function checkTextStyles(html, name, entries, issues) {
   } catch (error) { issues.push(`${name}: stylesheet dependency: ${error.message}`); }
 }
 
+export function classifyValidatorReferences(entries, brokenLinks, dependencyReferences = new Map()) {
+  const inert = new Map(), active = new Set();
+  for (const [name, bytes] of Object.entries(entries)) {
+    if (!/\.(?:xhtml|html)$/.test(name)) continue;
+    const xml = bytes.toString('utf8');
+    let tokens;
+    try { assertWellFormedXml(xml); tokens = xmlMarkupTokens(xml); }
+    catch { continue; }
+    const spans = tokens.filter((token) => token.type === 'comment' || token.type === 'cdata');
+    for (const match of xml.matchAll(XHTML_ATTR_RE)) {
+      const value = match[3], target = posix.normalize(`${posix.dirname(name)}/${value.split('#', 1)[0]}`);
+      const report = `${name}: 引用 ${value} → ${target} 不存在`;
+      const span = spans.find((span) => match.index >= span.start && match.index + match[0].length <= span.end);
+      let hasDependency = false;
+      for (const reference of dependencyReferences.get(name) ?? []) {
+        if (reference === value) { hasDependency = true; break; }
+        try {
+          const actual = new URL(reference, `https://epub.invalid/${name}`), candidate = new URL(value, `https://epub.invalid/${name}`);
+          actual.hash = ''; candidate.hash = '';
+          if (decodeURI(actual.href) === decodeURI(candidate.href)) { hasDependency = true; break; }
+        } catch { hasDependency = true; break; }
+      }
+      if (!span || hasDependency) active.add(report);
+      else {
+        const records = inert.get(report) ?? [];
+        records.push({ file: name, reference: value, regionType: span.type, start: match.index, end: match.index + match[0].length });
+        inert.set(report, records);
+      }
+    }
+  }
+  const retained = [], ignored = new Map();
+  for (const report of brokenLinks) {
+    if (!inert.has(report) || active.has(report)) retained.push(report);
+    else for (const record of inert.get(report)) ignored.set(`${record.file}\u0000${record.start}`, record);
+  }
+  return { brokenLinks: retained, ignoredNonElementReferences: [...ignored.values()] };
+}
+
 export async function checkBuiltEpub({ config, session, capture, epubPath }) {
   validateSession(session); assertConfig(config, session); validateCapture(capture, session);
   const issues = [], allowedCorrections = [];
   const stats = { spine: session.spine.length, xhtml: 0, resources: 0, textCharacters: 0, ruby: 0, images: 0 };
   let rawTextEqual = true;
-  let entries, names;
+  let entries, names, validation;
   try {
     const epub = await readEpub(epubPath); entries = epub.entries; names = epub.names;
-    const validation = await validateOutput(epubPath);
-    issues.push(...validation.issues, ...validation.brokenLinks, ...validation.orphans.map((name) => `Orphan file: ${name}`));
+    validation = await validateOutput(epubPath);
+    issues.push(...validation.issues, ...validation.orphans.map((name) => `Orphan file: ${name}`));
     if (!validation.ok && !validation.issues.length) issues.push('Validator failed');
-  } catch (error) { return { ok: false, issues: [`EPUB validation failed: ${error.message}`], allowedCorrections, rawTextEqual: false, stats }; }
+  } catch (error) { return { ok: false, issues: [`EPUB validation failed: ${error.message}`], allowedCorrections, rawTextEqual: false, stats, ignoredNonElementReferences: [] }; }
   if (new Set(names).size !== names.length) issues.push('Duplicate ZIP entry');
+  const dependencyReferences = new Map();
   for (const name of names) {
     try { if (safeRelativePath(name) !== name) issues.push(`Noncanonical ZIP path: ${name}`); }
     catch { issues.push(`Unsafe ZIP path: ${name}`); }
@@ -185,8 +247,11 @@ export async function checkBuiltEpub({ config, session, capture, epubPath }) {
       try { assertWellFormedXml(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); }
       catch (error) { issues.push(`Invalid XML: ${name}: ${error.message}`); }
     }
-    if (/\.(?:xhtml|html|css|svg)$/.test(name)) inspectDependencies(name, bytes.toString('utf8'), entries, issues);
+    if (/\.(?:xhtml|html|css|svg)$/.test(name)) dependencyReferences.set(name, inspectDependencies(name, bytes.toString('utf8'), entries, issues));
   }
+  const references = classifyValidatorReferences(entries, validation.brokenLinks, dependencyReferences);
+  stats.ignoredInertBrokenLinks = validation.brokenLinks.length - references.brokenLinks.length;
+  issues.push(...references.brokenLinks);
   const opfBytes = entries['item/standard.opf'];
   if (!opfBytes) issues.push('Missing output OPF');
   else {
@@ -242,7 +307,7 @@ export async function checkBuiltEpub({ config, session, capture, epubPath }) {
       stats.textCharacters += actual.bodyText.length; stats.ruby += actual.ruby.length; stats.images += actual.images.length;
     } catch (error) { issues.push(`XHTML inspection failed ${item.href}: ${error.message}`); rawTextEqual = false; }
   }
-  return { ok: issues.length === 0, issues, allowedCorrections, rawTextEqual, stats };
+  return { ok: issues.length === 0, issues, allowedCorrections, rawTextEqual, stats, ignoredNonElementReferences: references.ignoredNonElementReferences };
 }
 
 export async function buildHyreadEpub(config, { replace = false } = {}) {

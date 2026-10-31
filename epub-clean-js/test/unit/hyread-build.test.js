@@ -281,3 +281,76 @@ test('existing XHTML doctype is retained once when adding an XML declaration', a
   assert.equal(built.report.ok, true);
   assert.equal((entries['item/xhtml/body1.xhtml'].toString().match(/<!DOCTYPE/g) ?? []).length, 1);
 });
+
+for (const [label, mutate] of [
+  ['illegal comment --', (s) => s.replace('</head>', '<!-- a -- b --></head>')],
+  ['trailing DOCTYPE', (s) => s.replace(/<!DOCTYPE html>\s*/, '') + '<!DOCTYPE html>'],
+  ['ordinary text closing CDATA delimiter', (s) => s.replace('</head>', 'abc]]></head>')],
+  ['empty prefixed namespace', (s) => s.replace('</head>', '<meta xmlns:p=""/></head>')],
+  ['xml prefix wrong URI', (s) => s.replace('</head>', '<meta xmlns:xml="urn:wrong"/></head>')],
+  ['duplicate expanded attributes', (s) => s.replace('</head>', '<meta xmlns:p="urn:same" xmlns:q="urn:same" p:a="1" q:a="2"/></head>')],
+  ['unsupported XML version', (s) => s.replace('version="1.0"', 'version="foo"')],
+  ['missing XML version', (s) => s.replace('<?xml version="1.0" encoding="UTF-8"?>', '<?xml?>')],
+]) test(`CQ1 fix2: ${label} must report Invalid XML with unchanged body text`, async (t) => {
+  const f = await fixture(t), built = await buildHyreadEpub(f.config), { entries } = await readEpub(built.outputPath);
+  entries['item/xhtml/body1.xhtml'] = Buffer.from(mutate(entries['item/xhtml/body1.xhtml'].toString()));
+  const epubPath = join(f.config.workDir, 'malformed-fix2.epub'); await writeEpub(epubPath, entries);
+  const result = await checkBuiltEpub({ config: f.config, session: f.session, capture: f.capture, epubPath });
+  assert.equal(result.rawTextEqual, true);
+  assert.ok(result.issues.some((issue) => /Invalid XML/.test(issue)), JSON.stringify(result));
+});
+
+for (const [label, inert] of [
+  ['commented missing link', '<!-- <link rel="stylesheet" href="missing.css"/> -->'],
+  ['CDATA missing link', '<![CDATA[<link rel="stylesheet" href="missing.css"/>]]>'],
+  ['commented reader cleanup tags', '<!-- <base href="https://example.invalid/"/><link href="blob:fake"/><style xmlns="">fake</style><body style="fake"><div class="main" style="fake"> -->'],
+]) test(`CQ4: ${label} is preserved and does not become a resource dependency`, async (t) => {
+  const f = await fixture(t), src = f.capture.order[1];
+  f.capture.data[src] = f.capture.data[src].replace('</head>', `${inert}</head>`);
+  await writeFile(f.config.capturePath, JSON.stringify(f.capture));
+  const built = await buildHyreadEpub(f.config), { entries } = await readEpub(built.outputPath);
+  assert.equal(built.report.ok, true);
+  assert.ok(entries['item/xhtml/body1.xhtml'].toString().includes(inert));
+  const ignored = built.report.ignoredNonElementReferences;
+  assert.ok(Array.isArray(ignored));
+  assert.deepEqual(ignored.map(({ file, reference, regionType }) => ({ file, reference, regionType })), [{ file: 'item/xhtml/body1.xhtml', reference: label === 'commented reader cleanup tags' ? 'blob:fake' : 'missing.css', regionType: label === 'CDATA missing link' ? 'cdata' : 'comment' }]);
+  assert.ok(ignored.every((entry) => Number.isSafeInteger(entry.start) && entry.end > entry.start));
+});
+
+test('CQ4: an actual missing stylesheet remains a failing dependency', async (t) => {
+  const f = await fixture(t), src = f.capture.order[1];
+  f.capture.data[src] = f.capture.data[src].replace('</head>', '<link rel="stylesheet" href="missing.css"/></head>');
+  await writeFile(f.config.capturePath, JSON.stringify(f.capture));
+  await assert.rejects(buildHyreadEpub(f.config), /Missing stylesheet dependency/);
+});
+
+test('CQ4: a real missing link identical to commented markup remains in validator failures', async (t) => {
+  const f = await fixture(t), built = await buildHyreadEpub(f.config), { entries } = await readEpub(built.outputPath);
+  const link = '<link rel="stylesheet" href="missing.css"/>';
+  entries['item/xhtml/body1.xhtml'] = Buffer.from(entries['item/xhtml/body1.xhtml'].toString().replace('</head>', `<!-- ${link} -->${link}</head>`));
+  const epubPath = join(f.config.workDir, 'real-and-inert-link.epub'); await writeEpub(epubPath, entries);
+  const result = await checkBuiltEpub({ config: f.config, session: f.session, capture: f.capture, epubPath });
+  assert.equal(result.ok, false);
+  assert.ok(result.issues.some((issue) => issue.includes('引用 missing.css')));
+  assert.ok(result.issues.some((issue) => /dependency.*missing|missing.*dependency/i.test(issue)));
+});
+
+test('CQ4: unknown validator diagnostics are retained alongside a proven inert reference', async (t) => {
+  const f = await fixture(t), built = await buildHyreadEpub(f.config), { entries } = await readEpub(built.outputPath);
+  entries['item/xhtml/body1.xhtml'] = Buffer.from(entries['item/xhtml/body1.xhtml'].toString().replace('</head>', '<!-- <link href="missing.css"/> --></head>'));
+  const { classifyValidatorReferences } = await import('../../hyread/lib/build.mjs');
+  assert.equal(typeof classifyValidatorReferences, 'function');
+  const result = classifyValidatorReferences(entries, ['item/xhtml/body1.xhtml: 引用 missing.css → item/xhtml/missing.css 不存在', 'future validator diagnostic: unknown format']);
+  assert.deepEqual(result.brokenLinks, ['future validator diagnostic: unknown format']);
+  assert.equal(result.ignoredNonElementReferences.length, 1);
+});
+
+test('CQ4: a true CSS dependency identical to a commented link is never classified as inert', async (t) => {
+  const f = await fixture(t), built = await buildHyreadEpub(f.config), { entries } = await readEpub(built.outputPath);
+  entries['item/xhtml/body1.xhtml'] = Buffer.from(entries['item/xhtml/body1.xhtml'].toString().replace('</head>', '<!-- <link href="missing.css"/> --><style>p{background:url(missing.css)}</style></head>'));
+  const epubPath = join(f.config.workDir, 'css-and-inert-link.epub'); await writeEpub(epubPath, entries);
+  const result = await checkBuiltEpub({ config: f.config, session: f.session, capture: f.capture, epubPath });
+  assert.equal(result.ok, false);
+  assert.ok(result.issues.some((issue) => issue.includes('引用 missing.css')));
+  assert.deepEqual(result.ignoredNonElementReferences, []);
+});
