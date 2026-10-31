@@ -15,6 +15,7 @@
   const clone = (value) => JSON.parse(JSON.stringify(value));
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const digest = async (bytes) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (byte) => byte.toString(16).padStart(2, '0')).join('');
+  const sourceUrl = (assetId, href) => `https://service.ebook.hyread.com.tw/ebookservice/epub/${encodeURIComponent(assetId)}/item/${href.split('/').map(encodeURIComponent).join('/')}`;
   const emptyStatus = () => ({ state: 'idle', mode: null, phase: 'idle', progress: { completed: 0, total: 0, spineId: null, page: null, pageCount: null }, errors: [], restoration: { attempted: false, ok: false, error: null } });
   let state = emptyStatus(), cancelled = false, restoring = false, output = null, encoded = null, encodedSha = null, chunkView = null, settings, session;
   let pendingNavigation = null, recoveryOrigin = null, settlingRecovery = false;
@@ -53,7 +54,7 @@
     const metadata = reader().getBookMetadata();
     if (typeof metadata?.title !== 'string') throw new Error('Missing reader book title');
     const value = current();
-    return { schemaVersion: 1, assetId: value.assetId, title: metadata.title, current: { spineId: value.item.spineId, src: value.src, page: value.page, pageCount: value.pageCount } };
+    return { schemaVersion: 1, assetId: value.assetId, title: metadata.title, current: { spineId: value.item.spineId, src: sourceUrl(value.assetId, value.src), page: value.page, pageCount: value.pageCount } };
   }
 
   class WorkflowCancelled extends Error {}
@@ -237,7 +238,7 @@
       const bounds = node.getBoundingClientRect();
       return { tag: node.tagName.toLowerCase(), src: resourceUrl(node.getAttribute('src') || node.getAttribute('href') || node.getAttribute('xlink:href'), value.src), alt: node.getAttribute('alt') || '', paragraphIndex: blocks.findIndex((block) => block.contains(node)), width: Number(node.width?.baseVal?.value ?? node.width ?? bounds.width), height: Number(node.height?.baseVal?.value ?? node.height ?? bounds.height), complete: typeof node.complete === 'boolean' ? node.complete : null, naturalWidth: typeof node.naturalWidth === 'number' ? node.naturalWidth : null };
     });
-    return { src: value.src, spineId: value.item.spineId, spineIndex: value.item.spineIndex, bodyText: text(value.doc.body.textContent), paragraphs, images,
+    return { src: sourceUrl(value.assetId, value.src), spineId: value.item.spineId, spineIndex: value.item.spineIndex, bodyText: text(value.doc.body.textContent), paragraphs, images,
       ruby: Array.from(value.doc.body.querySelectorAll('ruby'), (node) => text(node.textContent)),
       bodyLinks: Array.from(value.doc.body.querySelectorAll('a[href]'), (node) => ({ text: text(node.textContent), href: node.getAttribute('href') })),
       pageCount: value.pageCount, pageChecks: [], bodyChanges: [], unseenTextBlocks: [], errors: [] };
@@ -254,11 +255,11 @@
       const visibleBlocks = result.paragraphs.filter((paragraph) => blocks[paragraph.index] && visibleArea(blocks[paragraph.index], bounds.width, bounds.height) > 0).map((paragraph) => paragraph.index);
       visibleBlocks.forEach((index) => seen.add(index));
       result.pageChecks.push({ page, total: value.pageCount, bodyUnchanged, visibleBlocks });
-      if (!bodyUnchanged) { result.bodyChanges.push({ page, bodyText: text(value.doc.body.textContent) }); issues.push({ src: value.src, page, type: 'bodyChanged' }); }
+      if (!bodyUnchanged) { result.bodyChanges.push({ page, bodyText: text(value.doc.body.textContent) }); issues.push({ src: sourceUrl(value.assetId, value.src), page, type: 'bodyChanged' }); }
       if (page < result.pageCount) value = await navigate(() => reader().turnToNextPage(), { src: value.src, page: page + 1 }, documentEvidence(value));
     }
     result.unseenTextBlocks = result.paragraphs.filter((paragraph) => paragraph.text && !seen.has(paragraph.index)).map((paragraph) => paragraph.index);
-    if (result.unseenTextBlocks.length) issues.push({ src: value.src, type: 'unseenTextBlocks', blocks: result.unseenTextBlocks });
+    if (result.unseenTextBlocks.length) issues.push({ src: sourceUrl(value.assetId, value.src), type: 'unseenTextBlocks', blocks: result.unseenTextBlocks });
     return result;
   }
 
@@ -317,9 +318,10 @@
       for (const image of value.doc.body.querySelectorAll('img,image')) resourceUrl(image.getAttribute('src') || image.getAttribute('href') || image.getAttribute('xlink:href'), value.src);
       const xml = new XMLSerializer().serializeToString(value.doc);
       if (typeof xml !== 'string' || !xml.includes('<') || !xml.length) throw new Error('Empty serialized XML');
-      order.push(value.src); data[value.src] = xml; state.progress.completed++;
+      const src = sourceUrl(value.assetId, value.src);
+      order.push(src); data[src] = xml; state.progress.completed++;
     }
-    if (JSON.stringify(order) !== JSON.stringify(session.spine.map((item) => item.href)) || Object.keys(data).length !== session.spine.length) throw new Error('Incomplete capture');
+    if (JSON.stringify(order) !== JSON.stringify(session.spine.map((item) => sourceUrl(session.assetId, item.href))) || JSON.stringify(Object.keys(data)) !== JSON.stringify(order)) throw new Error('Incomplete capture');
     return { order, data };
   }
 
@@ -336,7 +338,7 @@
       const evidence = documentEvidence(previous);
       const active = buttons[index].getAttribute('aria-label').includes('正在閱讀此章節');
       const value = active ? await goToPage(await stable(previous.src), 1) : await navigate(() => buttons[index].click(), { toc: true }, evidence);
-      tocEntries.push({ label: labels[index], src: value.src });
+      tocEntries.push({ label: labels[index], src: sourceUrl(value.assetId, value.src) });
       if (!visited.has(value.src)) { records.push(await auditSpine(value, issues)); visited.add(value.src); state.progress.completed++; }
     }
     for (let index = 0; index < session.spine.length; index++) {

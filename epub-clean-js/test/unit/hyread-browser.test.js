@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { createBrowserFixture, exportFixture } from '../helpers/hyread-browser-fixture.mjs';
 import { createBrowserScript } from '../../hyread/lib/browser-script.mjs';
 
+const bookSource = (href) => 'https://service.ebook.hyread.com.tw/ebookservice/epub/fixture-book-09/item/' + href;
 const timing = { timeoutMs: 400, pollMs: 2, stableSamples: 3 };
 async function fixture(t, options) { const f = await createBrowserFixture(options); t.after(() => f.cleanup()); await f.install(); return f; }
 
@@ -20,9 +21,9 @@ test('capture selects the visible frame, preserves XML and restores the exact st
   const { value, info, chunks, bytes } = await exportFixture(f.api());
   assert.equal(value.meta.complete, true);
   assert.equal(value.meta.kind, 'capture');
-  assert.deepEqual(value.order, ['xhtml/cover.xhtml', 'xhtml/body1.xhtml', 'xhtml/body2.xhtml']);
-  assert.match(value.data['xhtml/body1.xhtml'], /<ruby>字<rt>音<\/rt><\/ruby>/);
-  assert.match(value.data['xhtml/body1.xhtml'], /前😀<img/);
+  assert.deepEqual(value.order, [bookSource('xhtml/cover.xhtml'), bookSource('xhtml/body1.xhtml'), bookSource('xhtml/body2.xhtml')]);
+  assert.match(value.data[bookSource('xhtml/body1.xhtml')], /<ruby>字<rt>音<\/rt><\/ruby>/);
+  assert.match(value.data[bookSource('xhtml/body1.xhtml')], /前😀<img/);
   assert.equal(info.byteLength, bytes.length);
   assert.equal(info.sha256, createHash('sha256').update(bytes).digest('hex'));
   assert.ok(chunks.every((chunk, index) => chunk.bytes <= 7 && chunk.offset === index * 7 && chunk.sha256 === info.sha256));
@@ -34,7 +35,7 @@ test('audit follows duplicate TOC entries and checks every page and directory-fr
   await f.api().start({ session: f.session, ...timing, mode: 'audit' });
   const { value } = await exportFixture(f.api());
   assert.deepEqual(value.tocEntries.map((item) => item.label), ['同名', '同名', '同名']);
-  assert.deepEqual(value.tocEntries.map((item) => item.src), ['xhtml/body1.xhtml', 'xhtml/body2.xhtml', 'xhtml/body1.xhtml']);
+  assert.deepEqual(value.tocEntries.map((item) => item.src), [bookSource('xhtml/body1.xhtml'), bookSource('xhtml/body2.xhtml'), bookSource('xhtml/body1.xhtml')]);
   assert.equal(value.records.length, 3);
   const first = value.records.find((item) => item.spineId === 'body1');
   assert.deepEqual(first.pageChecks.map((item) => item.page), [1, 2, 3]);
@@ -134,7 +135,7 @@ test('source errors survive a second restoration error', async (t) => {
 
 test('describe reflects current book and status snapshots cannot mutate the running state', async (t) => {
   const f = await fixture(t);
-  assert.deepEqual(JSON.parse(JSON.stringify(f.api().describe())), { schemaVersion: 1, assetId: f.session.assetId, title: f.session.title, current: { spineId: 'body1', src: 'xhtml/body1.xhtml', page: 2, pageCount: 3 } });
+  assert.deepEqual(JSON.parse(JSON.stringify(f.api().describe())), { schemaVersion: 1, assetId: f.session.assetId, title: f.session.title, current: { spineId: 'body1', src: bookSource('xhtml/body1.xhtml'), page: 2, pageCount: 3 } });
   const pending = f.api().start({ session: f.session, ...timing, restore: false });
   const status = f.api().status(); status.errors.push('injected'); status.state = 'failed';
   const summary = await pending;
@@ -152,7 +153,7 @@ test('generated ordinary script runs real capture and returns only the status su
   assert.equal(result.state, 'complete');
   assert.equal('data' in result, false);
   const { value } = await exportFixture(f.api());
-  assert.deepEqual(value.order, ['xhtml/cover.xhtml', 'xhtml/body1.xhtml', 'xhtml/body2.xhtml']);
+  assert.deepEqual(value.order, [bookSource('xhtml/cover.xhtml'), bookSource('xhtml/body1.xhtml'), bookSource('xhtml/body2.xhtml')]);
   assert.deepEqual(f.position(), { chapter: 1, page: 2 });
   await assert.rejects(createBrowserScript(f.session, { mode: 'other' }));
 });
@@ -206,28 +207,28 @@ test('audit waits for delayed TOC navigation before attributing entries to sourc
   const f = await fixture(t, { moveDelay: 90 });
   await f.api().start({ session: f.session, ...timing, mode: 'audit' });
   const { value } = await exportFixture(f.api());
-  assert.deepEqual(value.tocEntries.map((item) => item.src), ['xhtml/body1.xhtml', 'xhtml/body2.xhtml', 'xhtml/body1.xhtml']);
+  assert.deepEqual(value.tocEntries.map((item) => item.src), [bookSource('xhtml/body1.xhtml'), bookSource('xhtml/body2.xhtml'), bookSource('xhtml/body1.xhtml')]);
 });
 
 test('audit reads TOC buttons reused in a hidden panel', async (t) => {
   const f = await fixture(t, { persistentToc: true });
   await f.api().start({ session: f.session, ...timing, mode: 'audit' });
   const { value } = await exportFixture(f.api());
-  assert.deepEqual(value.tocEntries.map((item) => item.src), ['xhtml/body1.xhtml', 'xhtml/body2.xhtml', 'xhtml/body1.xhtml']);
+  assert.deepEqual(value.tocEntries.map((item) => item.src), [bookSource('xhtml/body1.xhtml'), bookSource('xhtml/body2.xhtml'), bookSource('xhtml/body1.xhtml')]);
 });
 
 test('audit tolerates temporarily invisible frames during a TOC transition', async (t) => {
   const f = await fixture(t, { moveDelay: 90, transitionInvisible: true });
   await f.api().start({ session: f.session, ...timing, mode: 'audit' });
   const { value } = await exportFixture(f.api());
-  assert.deepEqual(value.tocEntries.map((item) => item.src), ['xhtml/body1.xhtml', 'xhtml/body2.xhtml', 'xhtml/body1.xhtml']);
+  assert.deepEqual(value.tocEntries.map((item) => item.src), [bookSource('xhtml/body1.xhtml'), bookSource('xhtml/body2.xhtml'), bookSource('xhtml/body1.xhtml')]);
 });
 
 test('audit accepts an explicitly active TOC item even when the first page does not change', async (t) => {
   const f = await fixture(t, { initialChapter: 1, initialPage: 1, pages: [1, 1, 2], toc: [{ label: '同名', index: 1 }, { label: '同名', index: 1 }] });
   await f.api().start({ session: f.session, ...timing, mode: 'audit' });
   const { value } = await exportFixture(f.api());
-  assert.deepEqual(value.tocEntries, [{ label: '同名', src: 'xhtml/body1.xhtml' }, { label: '同名', src: 'xhtml/body1.xhtml' }]);
+  assert.deepEqual(value.tocEntries, [{ label: '同名', src: bookSource('xhtml/body1.xhtml') }, { label: '同名', src: bookSource('xhtml/body1.xhtml') }]);
 });
 
 test('audit fails when a nonactive TOC item never navigates instead of recording the old spine', async (t) => {
@@ -240,17 +241,17 @@ test('capture waits for document evidence when React source changes before the o
   const f = await fixture(t, { contentDelay: 100 });
   await f.api().start({ session: f.session, ...timing });
   const { value } = await exportFixture(f.api());
-  assert.match(value.data['xhtml/cover.xhtml'], /alt="封面"/);
-  assert.match(value.data['xhtml/body1.xhtml'], /前😀/);
-  assert.match(value.data['xhtml/body2.xhtml'], /圖前/);
+  assert.match(value.data[bookSource('xhtml/cover.xhtml')], /alt="封面"/);
+  assert.match(value.data[bookSource('xhtml/body1.xhtml')], /前😀/);
+  assert.match(value.data[bookSource('xhtml/body2.xhtml')], /圖前/);
 });
 
 test('audit waits for the new document before assigning its text to a source path', async (t) => {
   const f = await fixture(t, { contentDelay: 100 });
   await f.api().start({ session: f.session, ...timing, mode: 'audit' });
   const { value } = await exportFixture(f.api());
-  assert.equal(value.records.find((item) => item.src === 'xhtml/cover.xhtml').bodyText, '');
-  assert.equal(value.records.find((item) => item.src === 'xhtml/body2.xhtml').bodyText, '圖前。圖後。');
+  assert.equal(value.records.find((item) => item.src === bookSource('xhtml/cover.xhtml')).bodyText, '');
+  assert.equal(value.records.find((item) => item.src === bookSource('xhtml/body2.xhtml')).bodyText, '圖前。圖後。');
 });
 
 test('a changed React source with permanently stale document fails without an export', async (t) => {
@@ -293,7 +294,7 @@ test('expanded official TOC includes duplicate entries below the viewport', asyn
   const f = await fixture(t, { initialPage: 1, pages: [1, 1, 2], toc: [{ label: '同名', index: 1, y: 20 }, { label: '同名', index: 1, y: 700 }] });
   await f.api().start({ session: f.session, ...timing, mode: 'audit' });
   const { value } = await exportFixture(f.api());
-  assert.deepEqual(value.tocEntries, [{ label: '同名', src: 'xhtml/body1.xhtml' }, { label: '同名', src: 'xhtml/body1.xhtml' }]);
+  assert.deepEqual(value.tocEntries, [{ label: '同名', src: bookSource('xhtml/body1.xhtml') }, { label: '同名', src: bookSource('xhtml/body1.xhtml') }]);
 });
 
 for (const initialBaseAhead of [false, true]) {
@@ -301,8 +302,8 @@ for (const initialBaseAhead of [false, true]) {
     const f = await fixture(t, { initialChapter: 0, initialPage: 1, initialDocumentChapter: 2, initialBaseAhead });
     await f.api().start({ session: f.session, ...timing });
     const { value, bytes } = await exportFixture(f.api());
-    assert.match(value.data['xhtml/cover.xhtml'], /alt="封面"/);
-    assert.doesNotMatch(value.data['xhtml/cover.xhtml'], /圖前/);
+    assert.match(value.data[bookSource('xhtml/cover.xhtml')], /alt="封面"/);
+    assert.doesNotMatch(value.data[bookSource('xhtml/cover.xhtml')], /圖前/);
     assert.doesNotMatch(bytes.toString('utf8'), /fixture-private-context|openbook2\.jsp/);
   });
 }
@@ -403,4 +404,40 @@ test('cancel settles an already issued nonactive TOC click before restoring', as
   assert.deepEqual(f.position(), { chapter: 1, page: 2 });
   await new Promise((resolve) => setTimeout(resolve, 180));
   assert.deepEqual(f.position(), { chapter: 1, page: 2 });
+});
+
+test('produced capture keys remain compatible with the legacy item URL mapper', async (t) => {
+  const f = await fixture(t);
+  await f.api().start({ session: f.session, ...timing });
+  const { value } = await exportFixture(f.api());
+  const mappedOrder = value.order.map((src) => src.split('/item/')[1]);
+  assert.deepEqual(mappedOrder, ['xhtml/cover.xhtml', 'xhtml/body1.xhtml', 'xhtml/body2.xhtml']);
+  assert.deepEqual(value.order, [
+    'https://service.ebook.hyread.com.tw/ebookservice/epub/fixture-book-09/item/xhtml/cover.xhtml',
+    'https://service.ebook.hyread.com.tw/ebookservice/epub/fixture-book-09/item/xhtml/body1.xhtml',
+    'https://service.ebook.hyread.com.tw/ebookservice/epub/fixture-book-09/item/xhtml/body2.xhtml',
+  ]);
+  const legacyData = Object.fromEntries(value.order.map((src) => [src.split('/item/')[1], value.data[src]]));
+  assert.match(legacyData['xhtml/cover.xhtml'], /alt="封面"/);
+  assert.match(legacyData['xhtml/body1.xhtml'], /<ruby>字<rt>音<\/rt><\/ruby>/);
+  assert.match(legacyData['xhtml/body2.xhtml'], /圖前/);
+  assert.deepEqual(Object.keys(value.data), value.order);
+  assert.deepEqual(f.session.spine.map((item) => item.href), ['xhtml/cover.xhtml', 'xhtml/body1.xhtml', 'xhtml/body2.xhtml']);
+});
+
+test('describe before start and all audit public source fields use canonical book URLs', async (t) => {
+  const f = await fixture(t);
+  assert.equal(f.api().describe().current.src, bookSource('xhtml/body1.xhtml'));
+  await f.api().start({ session: f.session, ...timing, mode: 'audit' });
+  const { value } = await exportFixture(f.api());
+  const publicSources = [...value.records, ...value.tocEntries, ...value.issues.filter((issue) => 'src' in issue)].map((entry) => entry.src);
+  assert.ok(publicSources.length >= 7);
+  for (const src of publicSources) {
+    const url = new URL(src);
+    assert.equal(url.origin, 'https://service.ebook.hyread.com.tw');
+    assert.match(url.pathname, /^\/ebookservice\/epub\/fixture-book-09\/item\/xhtml\/[^/]+\.xhtml$/);
+    assert.equal(url.search, '');
+    assert.equal(url.hash, '');
+  }
+  assert.deepEqual(value.records.find((entry) => entry.spineId === 'body1').bodyLinks, [{ text: '回上段', href: '#first' }]);
 });
