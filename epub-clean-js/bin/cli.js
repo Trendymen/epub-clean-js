@@ -15,6 +15,7 @@ const entries = {
   "lightnovel-html-simple-batch": "../src/entries/lightnovel-html-simple-batch.js",
   "build-yimei-simple": "../src/entries/lightnovel-html-simple-batch.js",
   "hyread-to-simple":            "../src/entries/hyread-to-simple.js",
+  "hyread":                     "../hyread/cli.mjs",
 };
 
 if (!cmd || cmd === "--help" || cmd === "-h") {
