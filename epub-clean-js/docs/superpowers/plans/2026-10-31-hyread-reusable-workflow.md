@@ -165,5 +165,3 @@
 - [ ] **Step 5: 兼容验收。** 控制器提供原第14卷旧capture路径，仅作只读输入；用独立临时workDir准备资源并构建，输出独立路径，对比32文件正文和22图/7CSS及允许差异，不覆盖已有EPUB。此条由控制器执行或与实现者明确交接，报告不得先宣称通过。
 - [ ] **Step 6: 浏览器实测交接。** 由控制器独占原Chrome标签，使用新脚本执行capture与audit、分块接收和require-live验证，记录实际范围/哈希/结果，恢复阅读位置。实现者不得同时操作浏览器。若私有reader适配有问题，由控制器把具体证据交回 Task 2 实现者，并复用 Task 2 原 reviewer 对适配修复复审；若涉及命令组合或文档，则由 Task 5 实现者处理其所有文件并复审。
 - [ ] **Step 7: 全部验证与提交。** 跑 npm run test:hyread、npm run test:portability、npm test；预期旧HyRead数据依赖失败消失，其余外部字体基线失败逐项报告，不改无关字体模块。提交 feat(hyread): expose reusable workflow commands and runbook。
-
-
