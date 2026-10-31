@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { ReadableStream } from 'node:stream/web';
 import { subsetAll } from '../../src/core/font-subset.js';
 
 const hash = data => createHash('sha256').update(data).digest('hex');
@@ -15,6 +16,23 @@ const resources = [
   { name: 'font.otf', file: 'sans/font.otf', url: 'https://fixture.test/font', bytes: font.length, sha256: hash(font) },
   { name: 'LICENSE.txt', file: 'sans/LICENSE.txt', url: 'https://fixture.test/license', bytes: license.length, sha256: hash(license) },
 ];
+
+test('font preparation aborts an unfinished HTTP error response and preserves its status', async (t) => {
+  const { prepareFonts } = await import('../../src/core/font-resources.js');
+  const root = await mkdtemp(join(tmpdir(), 'font-http-open-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  let requestSignal;
+  let canceled = false;
+  const body = new ReadableStream({ cancel() { canceled = true; } });
+  t.after(() => body.cancel());
+  await assert.rejects(prepareFonts({ destRoot: root, resources: [resources[0]],
+    fetchImpl: async (url, { signal }) => {
+      requestSignal = signal;
+      return new Response(body, { status: 503 });
+    } }), /Font download failed \(503\)/);
+  assert.ok(requestSignal.aborted || canceled, 'the failed request must be aborted or its body canceled');
+  assert.deepEqual(await readdir(root), []);
+});
 
 test('font preflight lists missing paths and explicit prepare command', async () => {
   await assert.rejects(subsetAll({ sansRegular: new Set('字') }, { sansRegular: join(tmpdir(), 'absent-font.otf') }), /npm run prepare:fonts/);

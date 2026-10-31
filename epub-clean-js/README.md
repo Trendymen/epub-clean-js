@@ -51,7 +51,7 @@ node bin/cli.js hyread-to-simple --volume another-days --source /path/to/source.
 
 `--source`、`--ref`、`--style-ref` 分别覆盖自动查找的字段，已提供的输入不依赖默认目录存在。11/12/13 省略 `--style-ref` 时继续查找默认同卷 healed 源；其他数字卷以及 `another-days` 在同时显式提供 `--source` 和 `--ref` 时，允许省略 `--style-ref`，只使用基础布局。数字卷需要自动补齐 source/ref 时，也会要求同卷 healed 源。`another-days`（含 `an`、`AN` 别名）必须显式提供 source/ref。单卷默认附特典，`--no-include-specials` 生成普通版。
 
-HyRead 入口按源文位置识别章节标题和原生 ruby，本体与读音都繁转简，不会把正文中相同的普通字符串自动改成 ruby。HTML 入口保留已有显式 `--ruby 'text|base|ruby'` 参数，用于为普通文本指定替换串、ruby 本体与读音；它属于文本匹配兼容模式，不能恢复源书中已经丢失的注音位置。生成时统一 OPF/NCX 的 UUID，修复导入脚注的重复 ID，并在发布输出前检查 EPUB 元数据、内部资源与片段链接、重复 ID、manifest 和 spine 等结构；校验失败时保留已有输出。结构检查不能替代阅读器显示验收。
+HyRead 入口按源文位置识别章节标题和原生 ruby，本体与读音都繁转简，不会把正文中相同的普通字符串自动改成 ruby。HTML 入口保留已有显式 `--ruby 'text|base|ruby'` 参数，用于为普通文本指定替换串、ruby 本体与读音；它属于文本匹配兼容模式，不能恢复源书中已经丢失的注音位置。生成时统一 OPF/NCX 的 UUID，修复导入脚注的重复 ID，并在发布输出前检查 EPUB 必需元数据、内部资源与片段链接、重复 ID、CSS 引用、manifest 资源存在性和 OPF/NCX 标识一致性；校验失败时保留已有输出。当前运行时不检查 spine 的 itemref/idref 与 manifest 的对应关系。结构检查不能替代阅读器显示验收。
 
 ### migrate-translation（09 卷台版译文迁移，绑义妹生活）
 

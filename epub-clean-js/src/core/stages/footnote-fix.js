@@ -209,6 +209,23 @@ function footnoteScope(target, targets) {
   return target;
 }
 
+function aliasScope(scope, scopes) {
+  const aside = scope?.closest('aside');
+  if (!aside) return scope;
+  let owner = scope;
+  for (const candidate of scopes) {
+    if (!candidate || candidate === owner || !candidate.contains(owner)
+      || candidate.closest('aside') !== aside) continue;
+    // 共享列表中的 li 各有正文，只有单项列表才可作为外层目标的别名。
+    const lists = [...candidate.querySelectorAll('ol, ul')];
+    if (['OL', 'UL'].includes(candidate.tagName)) lists.push(candidate);
+    if (lists.some(list => list.children.length > 1
+      && [...list.children].some(child => child.contains(owner)))) continue;
+    owner = candidate;
+  }
+  return owner;
+}
+
 /**
  * 抽取锚点对应的脚注正文（按 href #id 找配对的 aside / li / section / note 元素）。
  * @param {Element} anchor
@@ -224,6 +241,7 @@ function extractBody(anchor, document, scope, references, targetIds) {
 
   let source = scope;
   let content = scope;
+  const removedIds = new Set([scope.id].filter(Boolean));
   const wrapper = scope.firstElementChild;
   if (scope.tagName === 'ASIDE' && scope.children.length === 1 && wrapper.tagName === 'A'
     && references.has(wrapper.getAttribute('href'))
@@ -233,6 +251,9 @@ function extractBody(anchor, document, scope, references, targetIds) {
     && list.children.length === 1 && list.firstElementChild.tagName === 'LI'
     && [...content.childNodes].every((node) => node === list || !node.textContent.trim())) {
     source = list.firstElementChild;
+    for (const node of [content, list, source]) {
+      if (node.id) removedIds.add(node.id);
+    }
   }
   const body = document.createElement('div');
   body.innerHTML = source.tagName === 'P' ? source.outerHTML : source.innerHTML;
@@ -268,7 +289,7 @@ function extractBody(anchor, document, scope, references, targetIds) {
   const text = plainText(body).trim();
   const preserveHtml = body.querySelector('ruby, [id], a[href]') || body.querySelectorAll('p').length > 1;
   const html = body.innerHTML.trim();
-  return { text, bodyHtml: preserveHtml ? (body.querySelector('p') ? html : `<p>${html}</p>`) : null, scope };
+  return { text, bodyHtml: preserveHtml ? (body.querySelector('p') ? html : `<p>${html}</p>`) : null, scope, removedIds };
 }
 
 /**
@@ -313,6 +334,8 @@ export function upgradeFootnotes(xhtml, opts = {}) {
     const target = document.getElementById(anchor.getAttribute('href').slice(1));
     return { anchor, target, scope: footnoteScope(target, targets) };
   });
+  const scopes = items.map(item => item.scope);
+  for (const item of items) item.scope = aliasScope(item.scope, scopes);
   const groups = new Map();
   const owners = [];
   for (const item of items) {
@@ -330,7 +353,7 @@ export function upgradeFootnotes(xhtml, opts = {}) {
     const references = new Set(item.members.map(({ anchor }) => anchor.id && `#${anchor.id}`).filter(Boolean));
     const targetIds = new Set(item.members.map(({ target }) => target?.id).filter(Boolean));
     Object.assign(item, extractBody(item.anchor, document, item.scope, references, targetIds));
-    item.removedIds = new Set([...targetIds, item.scope?.id].filter(Boolean));
+    item.removedIds = new Set([...targetIds, ...(item.removedIds || [])]);
   }
   for (const item of owners) {
     if (!item.scope) continue;

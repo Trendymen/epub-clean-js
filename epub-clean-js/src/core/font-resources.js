@@ -64,7 +64,11 @@ async function download(resource, fetchImpl, timeoutMs) {
   const timer = setTimeout(() => controller.abort(new Error(`Font download timed out: ${resource.url}`)), timeoutMs);
   try {
     const response = await fetchImpl(resource.url, { signal: controller.signal });
-    if (!response.ok || !response.body) throw new Error(`Font download failed (${response.status}): ${resource.url}`);
+    if (!response.ok || !response.body) {
+      const error = new Error(`Font download failed (${response.status}): ${resource.url}`);
+      controller.abort(error);
+      throw error;
+    }
     const chunks = [];
     let bytes = 0;
     for await (const chunk of response.body) {

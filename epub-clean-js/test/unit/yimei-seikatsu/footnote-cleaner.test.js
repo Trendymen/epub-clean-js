@@ -5,6 +5,87 @@ import { normalizeFootnoteIds, upgradeFootnotes } from '../../../src/core/stages
 
 import { buildSteraFootnote } from '../../../books/yimei-seikatsu/migrate/footnote-cleaner.js';
 
+for (const layout of ['paragraph', 'single li']) {
+  for (const reverse of [false, true]) {
+    for (const withRuby of [false, true]) {
+      test(`upgrade shares an owner for aside/${layout} aliases, reverse=${reverse}, ruby=${withRuby}`, () => {
+        const detail = withRuby ? '<ruby>水星<rt>Mercury</rt></ruby>解释。' : '普通解释。';
+        const paragraph = `<p id="old_para"><span id="detail">${detail}</span><a href="#body_detail">正文详情</a></p>`;
+        const content = layout === 'single li' ? `<ol id="old_list"><li id="old_item">${paragraph}<p>后段。</p></li></ol>` : `${paragraph}<p>后段。</p>`;
+        const inner = layout === 'single li' ? 'old_item' : 'old_para';
+        const targetIds = reverse ? [inner, 'old_note'] : ['old_note', inner];
+        const refs = targetIds.map((id, index) => `<a epub:type="noteref" id="r${index}" href="#${id}">注</a>`).join('继续正文');
+        const links = ['old_note', 'old_para', 'detail', 'r0', 'r1', ...(layout === 'single li' ? ['old_list', 'old_item'] : [])];
+        const input = `<html><body><ul id="body_list"><li id="body_item"><p id="body_detail">正文${refs}结尾。</p><aside id="old_note">${content}</aside><p>仍在正文列表。</p></li><li>下一项。</li></ul><nav>${links.map(id => `<a href="#${id}">${id}</a>`).join('')}</nav></body></html>`;
+        const output = upgradeFootnotes(input);
+        const { document } = parseHTML(output);
+        const upgradedRefs = [...document.querySelectorAll('#body_detail a')];
+        assert.equal(document.querySelectorAll('aside').length, 1);
+        const note = document.querySelector('aside');
+        assert.equal(note.textContent, `${withRuby ? '水星Mercury解释。' : '普通解释。'}正文详情后段。`);
+        assert.equal(note.querySelectorAll('p').length, 2);
+        assert.equal(document.querySelectorAll('[id="detail"]').length, 1);
+        assert.equal(document.getElementById('detail').innerHTML, detail);
+        assert.deepEqual(upgradedRefs.map(a => a.getAttribute('href')), [`#${note.id}`, `#${note.id}`]);
+        assert.equal(new Set(upgradedRefs.map(a => a.id)).size, 2);
+        assert.deepEqual(upgradedRefs.map(a => a.querySelector('img').getAttribute('zy-footnote')),
+          Array(2).fill(`${withRuby ? '水星（Mercury）解释。' : '普通解释。'}正文详情\n后段。`));
+        assert.equal(document.getElementById('body_item').textContent, '正文继续正文结尾。仍在正文列表。');
+        assert.equal(document.getElementById('body_list').children.length, 2);
+        for (const link of document.querySelectorAll('a[href^="#"]')) {
+          const target = document.getElementById(link.getAttribute('href').slice(1));
+          assert.ok(target, `${link.textContent} must retain a target`);
+          if (link.parentElement.tagName === 'NAV') {
+            if (link.textContent === 'detail') assert.equal(target.id, 'detail');
+            else if (/^r\d$/.test(link.textContent)) assert.equal(target, upgradedRefs[Number(link.textContent.slice(1))]);
+            else assert.ok(target === note || note.contains(target));
+          }
+        }
+        assert.equal(note.querySelector('a').getAttribute('href'), '#body_detail');
+        const ids = [...document.querySelectorAll('[id]')].map(node => node.id);
+        assert.equal(ids.length, new Set(ids).size);
+        assert.equal(upgradeFootnotes(output), output);
+      });
+    }
+  }
+}
+
+test('upgrade maps IDs on unwrapped backlink, ol and li containers', () => {
+  const input = '<html><body><p>正文<a epub:type="noteref" id="r" href="#old">注</a></p><nav><a href="#wrapper">包装</a><a href="#list">列表</a><a href="#detail">详情</a><a href="#child">子详情</a></nav><aside id="old"><a id="wrapper" href="#r"><ol id="list"><li id="detail"><p><span id="child"><ruby>水星<rt>Mercury</rt></ruby>注释正文</span></p></li></ol></a></aside></body></html>';
+  const output = upgradeFootnotes(input);
+  const { document } = parseHTML(output);
+  const note = document.querySelector('aside');
+  assert.equal(note.textContent, '水星Mercury注释正文');
+  assert.equal(note.querySelector('ruby').outerHTML, '<ruby>水星<rt>Mercury</rt></ruby>');
+  for (const link of document.querySelectorAll('nav a')) {
+    const target = document.getElementById(link.getAttribute('href').slice(1));
+    assert.ok(target, link.textContent);
+    assert.ok(target === note || note.contains(target));
+  }
+  assert.equal(document.querySelector('nav a:last-child').getAttribute('href'), '#child');
+  const ids = [...document.querySelectorAll('[id]')].map(node => node.id);
+  assert.equal(ids.length, new Set(ids).size);
+  assert.equal(upgradeFootnotes(output), output);
+});
+
+test('upgrade keeps equal text in separate li notes separate while sharing each li alias', () => {
+  const input = '<html><body><p>正文<a epub:type="noteref" href="#first">注</a><a epub:type="noteref" href="#first_para">注</a><a epub:type="noteref" href="#second">注</a></p><aside><ol><li id="first"><p id="first_para"><span id="first_detail">相同解释。</span></p></li><li id="second"><p><span id="second_detail">相同解释。</span></p></li><li id="unreferenced">未引用正文。</li></ol></aside><nav><a href="#first_detail">第一处详情</a><a href="#second_detail">第二处详情</a></nav></body></html>';
+  const output = upgradeFootnotes(input);
+  const { document } = parseHTML(output);
+  const refs = [...document.querySelectorAll('body > p a')];
+  const targets = refs.map(a => document.getElementById(a.getAttribute('href').slice(1)));
+  assert.equal(targets[0], targets[1]);
+  assert.notEqual(targets[0], targets[2]);
+  assert.deepEqual(targets.map(note => note.textContent), ['相同解释。', '相同解释。', '相同解释。']);
+  assert.ok(targets[0].contains(document.getElementById('first_detail')));
+  assert.ok(targets[2].contains(document.getElementById('second_detail')));
+  assert.equal(document.getElementById('unreferenced').textContent, '未引用正文。');
+  for (const link of document.querySelectorAll('a[href^="#"]')) assert.ok(document.getElementById(link.getAttribute('href').slice(1)));
+  const ids = [...document.querySelectorAll('[id]')].map(node => node.id);
+  assert.equal(ids.length, new Set(ids).size);
+  assert.equal(upgradeFootnotes(output), output);
+});
+
 for (const layout of ['aside target', 'paragraph inside aside', 'paragraph without aside', 'paragraph without aside and external reference']) {
   test(`upgrade preserves the enclosing body list with a ${layout}`, () => {
     const reference = '<sup><a class="calibre-footnote" href="#old_note" id="old_ref">注</a></sup>';
