@@ -116,3 +116,16 @@ test('audit rejects missing image dimensions, non-image resources and reordered 
   assert.throws(() => validateAuditEnvelope({ ...audit, tocEntries: [{ label: 'Wrong target', src: f.config.itemBase + 'style.css' }] }, f.session));
   assert.throws(() => validateAuditEnvelope({ ...audit, records: [{ ...records[0], pageCount: 2, pageChecks: [{ page: 2, total: 2, bodyUnchanged: true, visibleBlocks: [] }, { page: 1, total: 2, bodyUnchanged: true, visibleBlocks: [] }] }, ...records.slice(1)] }, f.session));
 });
+
+test('F4: HTML img requires load observations; SVG null and img false/zero remain observations', async (t) => {
+  const f = await fixture(t);
+  const records = f.session.spine.map((item, spineIndex) => ({ src: f.config.itemBase + item.href, spineId: item.id, spineIndex, bodyText: '', paragraphs: [], images: [], ruby: [], bodyLinks: [], pageCount: 1, pageChecks: [{ page: 1, total: 1, bodyUnchanged: true, visibleBlocks: [] }], bodyChanges: [], unseenTextBlocks: [], errors: [] }));
+  const image = { tag: 'img', src: f.config.itemBase + 'images/pixel.png', alt: '', paragraphIndex: -1, width: 1, height: 1, complete: false, naturalWidth: 0 };
+  const makeAudit = (observation) => ({ meta: { ...f.meta, kind: 'audit' }, records: [{ ...records[0], images: [observation] }, ...records.slice(1)], tocEntries: [], imageHashes: [], issues: [] });
+  assert.doesNotThrow(() => validateAuditEnvelope(makeAudit(image), f.session));
+  assert.doesNotThrow(() => validateAuditEnvelope(makeAudit({ ...image, tag: 'image', complete: null, naturalWidth: null }), f.session));
+  for (const invalid of [{ ...image, complete: null }, { ...image, naturalWidth: null }]) assert.throws(() => validateAuditEnvelope(makeAudit(invalid), f.session), /image load observation/i);
+  const tx = transfer(f, makeAudit({ ...image, complete: null, naturalWidth: null }), { kind: 'audit', chunkBytes: 12000, chunkCount: 1 });
+  for (const chunk of tx.chunks) await receiveChunk(f.config, tx.info, chunk);
+  await assert.rejects(finalizeTransfer(f.config, tx.info), /image load observation/i);
+});

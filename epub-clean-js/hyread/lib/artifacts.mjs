@@ -69,7 +69,8 @@ export function validateAuditEnvelope(audit, session) {
       const href = resourceHref(image.src, session);
       require(session.manifest.find((item) => item.href === href).mediaType.startsWith('image/'), 'Image reference is not an image resource');
       require(['width', 'height'].every((key) => typeof image[key] === 'number' && Number.isFinite(image[key]) && image[key] >= 0), 'Invalid image dimensions');
-      require((image.complete === null || typeof image.complete === 'boolean') && (image.naturalWidth === null || (typeof image.naturalWidth === 'number' && Number.isFinite(image.naturalWidth) && image.naturalWidth >= 0)), 'Invalid image load observation');
+      const allowsNull = image.tag === 'image';
+      require((typeof image.complete === 'boolean' || (allowsNull && image.complete === null)) && ((typeof image.naturalWidth === 'number' && Number.isFinite(image.naturalWidth) && image.naturalWidth >= 0) || (allowsNull && image.naturalWidth === null)), 'Invalid image load observation');
     }
     require(record.ruby.every((v) => typeof v === 'string') && record.bodyLinks.every((v) => object(v) && typeof v.text === 'string' && typeof v.href === 'string'), 'Invalid ruby or link observations');
     require(record.pageChecks.length === record.pageCount, 'Incomplete page observations');

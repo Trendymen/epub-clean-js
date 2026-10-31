@@ -2,13 +2,14 @@ import { readFile, writeFile, mkdir, mkdtemp, unlink, lstat, link, rename } from
 import { dirname, join, posix } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { DOMParser } from 'linkedom';
-import { XMLValidator, XMLParser } from 'fast-xml-parser';
+import { XMLParser } from 'fast-xml-parser';
 import { readEpub, writeEpub } from '../../src/core/zip-io.js';
 import { validateOutput } from '../../src/core/validator.js';
 import { loadSession, validateSession } from './session.mjs';
 import { safeJoin, safeRelativePath } from './paths.mjs';
 import { validateCapture, itemBaseFor, resourceHref } from './artifacts.mjs';
 import { inspectXhtml, normalizeText, applyApprovedCorrections } from './content.mjs';
+import { cssReferences, assertWellFormedXml } from './syntax.mjs';
 
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const escapeXml = (text) => String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;').replace(/>/g, '&gt;');
@@ -30,18 +31,41 @@ async function readVerifiedResource(config, session, href) {
   return bytes;
 }
 
-function cleanXhtml(html, href, session) {
+function imageStylesheet(name, entries, seen = new Set()) {
+  if (posix.basename(name).toLowerCase() === 'fixed-layout-jp.css') return true;
+  if (seen.has(name)) return false;
+  seen.add(name);
+  if (!entries[name]) throw new Error(`Missing stylesheet dependency: ${name}`);
+  return cssReferences(entries[name].toString('utf8')).imports.some((value) => imageStylesheet(resolveReference(value, name).path, entries, seen));
+}
+
+function stylesheetTarget(value, name, session) {
+  if (session && value.startsWith(itemBaseFor(session))) return `item/${resourceHref(value, session)}`;
+  return resolveReference(value, name).path;
+}
+
+function cleanXhtml(html, href, session, entries) {
   html = html.replace(/<base\b[^>]*\/?\s*>/gi, '')
     .replace(/<link\b(?=[^>]*\bhref\s*=\s*(["'])blob:[\s\S]*?\1)[^>]*\/?\s*>/gi, '')
     .replace(/<style\b(?=[^>]*\bxmlns\s*=\s*(["'])\1)[^>]*>[\s\S]*?<\/style>/gi, '')
     .replace(/(<(?:html|body)\b[^>]*?)\s+style\s*=\s*(["'])[\s\S]*?\2/gi, '$1')
     .replace(/(<div\b(?=[^>]*\bclass\s*=\s*(["'])main\2)[^>]*?)\s+style\s*=\s*(["'])[\s\S]*?\3/gi, '$1');
   const imageOnly = /<svg[\s>]/i.test(html) && !inspectXhtml(html).bodyText;
-  if (!imageOnly) html = html.replace(/<link\b(?=[^>]*\bhref\s*=\s*(["'])[^"']*fixed-layout-jp\.css\1)[^>]*\/?\s*>/gi, '');
+  let removed = false;
+  if (!imageOnly) html = html.replace(/<link\b[^>]*\/?\s*>/gi, (tag) => {
+    const node = new DOMParser().parseFromString(tag, 'text/html').querySelector('link');
+    if (node && (node.getAttribute('rel') ?? '').toLowerCase().split(/\s+/).includes('stylesheet') && node.hasAttribute('href') && imageStylesheet(stylesheetTarget(node.getAttribute('href'), `item/${href}`, session), entries)) {
+      removed = true; return '';
+    }
+    return tag;
+  });
   const document = new DOMParser().parseFromString(html, 'text/html');
   const existing = new Set(Array.from(document.querySelectorAll('link[href]'), (node) => new URL(node.getAttribute('href'), itemBaseFor(session) + href).href));
-  const css = (imageOnly ? CSS_IMG : CSS_TEXT).map((name) => session.manifest.find((item) => item.mediaType === 'text/css' && posix.basename(item.href) === name)).filter(Boolean);
+  const candidates = (imageOnly ? CSS_IMG : CSS_TEXT).map((name) => session.manifest.find((item) => item.mediaType === 'text/css' && posix.basename(item.href) === name)).filter(Boolean);
+  const css = candidates.filter((item) => imageOnly || !imageStylesheet(`item/${item.href}`, entries));
   const links = css.filter((item) => !existing.has(itemBaseFor(session) + item.href)).map((item) => `<link rel="stylesheet" type="text/css" href="${escapeXml(posix.relative(posix.dirname(href), item.href))}"/>`).join('\n');
+  const hasExisting = Array.from(document.querySelectorAll('link[href]')).some((node) => (node.getAttribute('rel') ?? '').toLowerCase().split(/\s+/).includes('stylesheet'));
+  if (!imageOnly && (removed || candidates.length) && !hasExisting && !links) throw new Error(`No safe text stylesheet after removing image-only CSS dependency: ${href}`);
   if (links) html = html.replace(/<\/head>/i, `${links}\n</head>`);
   const base = itemBaseFor(session);
   html = html.replace(/\b(src|href|xlink:href)\s*=\s*(["'])(.*?)\2/gi, (whole, attr, quote, value) => {
@@ -51,7 +75,7 @@ function cleanXhtml(html, href, session) {
     const target = resourceHref(url.href.split('#')[0], session);
     return `${attr}=${quote}${escapeXml(posix.relative(posix.dirname(href), target) || posix.basename(target))}${url.hash}${quote}`;
   });
-  if (!/^\s*<\?xml\b/.test(html)) html = '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE html>\n' + html;
+  if (!/^\s*<\?xml\b/.test(html)) html = '<?xml version="1.0" encoding="UTF-8"?>\n' + (/<!DOCTYPE\b/i.test(html) ? '' : '<!DOCTYPE html>\n') + html;
   return html;
 }
 
@@ -107,7 +131,7 @@ function inspectDependencies(name, text, entries, issues) {
         const doc = new DOMParser().parseFromString(entries[target.path].toString('utf8'), 'application/xml');
         if (!Array.from(doc.querySelectorAll('[id]')).some((node) => node.getAttribute('id') === target.fragment)) issues.push(`${name}: missing fragment ${value}`);
       }
-    } catch (error) { issues.push(`${name}: ${error.message}`); }
+    } catch (error) { issues.push(`${name}: dependency: ${error.message}`); }
   };
   if (/\.(?:xhtml|html|svg)$/.test(name)) {
     const doc = new DOMParser().parseFromString(text, 'application/xml');
@@ -118,13 +142,26 @@ function inspectDependencies(name, text, entries, issues) {
       if (node.hasAttribute('srcset')) for (const source of node.getAttribute('srcset').split(',')) check(source.trim().split(/\s+/)[0]);
       if (node.localName === 'style') styles.push(node.textContent);
       if (node.hasAttribute('style')) styles.push(node.getAttribute('style'));
+      let svg = node;
+      while (svg && svg.localName?.split(':').at(-1) !== 'svg') svg = svg.parentElement;
+      if (svg) for (const attribute of ['fill', 'stroke', 'filter', 'clip-path', 'mask', 'marker', 'marker-start', 'marker-mid', 'marker-end', 'cursor', 'color-profile']) {
+        if (node.hasAttribute(attribute)) styles.push(node.getAttribute(attribute));
+      }
     }
   }
   for (const style of styles) {
-    const css = style.replace(/\/\*[\s\S]*?\*\//g, '');
-    for (const match of css.matchAll(/url\(\s*(?:(["'])(.*?)\1|([^)]*?))\s*\)/gi)) check(match[2] ?? match[3]);
-    for (const match of css.matchAll(/@import\s+(["'])(.*?)\1/gi)) check(match[2]);
+    try { for (const value of cssReferences(style).urls) check(value); }
+    catch (error) { issues.push(`${name}: ${error.message}`); }
   }
+}
+
+function checkTextStyles(html, name, entries, issues) {
+  const doc = new DOMParser().parseFromString(html, 'application/xml');
+  try {
+    const names = Array.from(doc.querySelectorAll('link[href]')).filter((node) => (node.getAttribute('rel') ?? '').toLowerCase().split(/\s+/).includes('stylesheet')).map((node) => stylesheetTarget(node.getAttribute('href'), name));
+    for (const node of doc.querySelectorAll('style')) for (const value of cssReferences(node.textContent).imports) names.push(stylesheetTarget(value, name));
+    for (const target of names) if (imageStylesheet(target, entries)) issues.push(`Text page loads image-only CSS dependency: ${name} -> ${target}`);
+  } catch (error) { issues.push(`${name}: stylesheet dependency: ${error.message}`); }
 }
 
 export async function checkBuiltEpub({ config, session, capture, epubPath }) {
@@ -144,7 +181,10 @@ export async function checkBuiltEpub({ config, session, capture, epubPath }) {
     try { if (safeRelativePath(name) !== name) issues.push(`Noncanonical ZIP path: ${name}`); }
     catch { issues.push(`Unsafe ZIP path: ${name}`); }
     const bytes = entries[name];
-    if (/\.(?:xhtml|html|xml|opf|svg|ncx)$/.test(name) && XMLValidator.validate(bytes.toString('utf8')) !== true) issues.push(`Invalid XML: ${name}`);
+    if (/\.(?:xhtml|html|xml|opf|svg|ncx)$/.test(name)) {
+      try { assertWellFormedXml(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); }
+      catch (error) { issues.push(`Invalid XML: ${name}: ${error.message}`); }
+    }
     if (/\.(?:xhtml|html|css|svg)$/.test(name)) inspectDependencies(name, bytes.toString('utf8'), entries, issues);
   }
   const opfBytes = entries['item/standard.opf'];
@@ -154,7 +194,7 @@ export async function checkBuiltEpub({ config, session, capture, epubPath }) {
       const sourceOpf = await readVerifiedResource(config, session, 'standard.opf');
       if (!opfBytes.equals(Buffer.from(stripHdf(sourceOpf.toString('utf8'))))) issues.push('Output OPF differs beyond hdf removal');
       const parsed = new XMLParser({ ignoreAttributes: false, removeNSPrefix: true, parseAttributeValue: false }).parse(opfBytes.toString('utf8')).package;
-      const manifest = array(parsed.manifest?.item).map((v) => ({ id: v['@_id'], href: v['@_href'], mediaType: v['@_media-type'], properties: String(v['@_properties'] ?? '').split(/\s+/).filter(Boolean) }));
+      const manifest = array(parsed.manifest?.item).map((v) => ({ id: v['@_id'], href: safeRelativePath(v['@_href']), mediaType: v['@_media-type'], properties: String(v['@_properties'] ?? '').split(/\s+/).filter(Boolean) }));
       const spine = array(parsed.spine?.itemref).map((v) => ({ id: v['@_idref'], href: manifest.find((item) => item.id === v['@_idref'])?.href }));
       if (JSON.stringify(manifest) !== JSON.stringify(session.manifest)) issues.push('Output manifest differs from session');
       if (JSON.stringify(spine) !== JSON.stringify(session.spine)) issues.push('Output spine differs from session');
@@ -198,7 +238,7 @@ export async function checkBuiltEpub({ config, session, capture, epubPath }) {
       if (bodyWithImagePositions(correction.html, src) !== bodyWithImagePositions(bytes.toString('utf8'), src)) issues.push(`Image/text positions differ: ${item.href}`);
       const links = (v) => v.links.map((anchor) => ({ ...anchor, href: new URL(anchor.href, src).href }));
       if (JSON.stringify(links(expected)) !== JSON.stringify(links(actual))) issues.push(`Body links differ: ${item.href}`);
-      if (actual.bodyText && /fixed-layout-jp\.css/i.test(bytes.toString('utf8'))) issues.push(`Text page loads image-only CSS: ${item.href}`);
+      if (actual.bodyText) checkTextStyles(bytes.toString('utf8'), `item/${item.href}`, entries, issues);
       stats.textCharacters += actual.bodyText.length; stats.ruby += actual.ruby.length; stats.images += actual.images.length;
     } catch (error) { issues.push(`XHTML inspection failed ${item.href}: ${error.message}`); rawTextEqual = false; }
   }
@@ -227,13 +267,14 @@ export async function buildHyreadEpub(config, { replace = false } = {}) {
     'META-INF/container.xml': Buffer.from('<?xml version="1.0" encoding="UTF-8"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="item/standard.opf" media-type="application/oebps-package+xml"/></rootfiles></container>'),
     'item/standard.opf': Buffer.from(stripHdf((await readVerifiedResource(config, session, 'standard.opf')).toString('utf8'))),
   };
+  for (const item of session.manifest) if (item.mediaType !== 'application/xhtml+xml') files[`item/${item.href}`] = await readVerifiedResource(config, session, item.href);
   for (const item of session.manifest) {
-    if (item.mediaType !== 'application/xhtml+xml') files[`item/${item.href}`] = await readVerifiedResource(config, session, item.href);
-    else if (item.properties.includes('nav') && !hrefs.has(item.href)) files[`item/${item.href}`] = Buffer.from(navigation(session, capture, item.href));
+    if (item.mediaType !== 'application/xhtml+xml') continue;
+    if (item.properties.includes('nav') && !hrefs.has(item.href)) files[`item/${item.href}`] = Buffer.from(navigation(session, capture, item.href));
     else {
       const src = capture.order.find((value) => resourceHref(value, session) === item.href);
       const { html } = applyApprovedCorrections(capture.data[src], { ...config, href: item.href });
-      files[`item/${item.href}`] = Buffer.from(cleanXhtml(html, item.href, session));
+      files[`item/${item.href}`] = Buffer.from(cleanXhtml(html, item.href, session, files));
     }
   }
   for (const [name, bytes] of Object.entries(files)) {

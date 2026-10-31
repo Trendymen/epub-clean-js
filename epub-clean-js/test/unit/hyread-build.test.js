@@ -161,3 +161,123 @@ test('dependency checks ignore CSS-like novel text and CSS comments but reject a
   await writeFile(config.capturePath, JSON.stringify(f.capture));
   await assert.rejects(buildHyreadEpub(config, { replace: true }), /dependency/);
 });
+
+test('F1: mixed text/SVG removes an indirectly imported image stylesheet and preserves CSS bytes', async (t) => {
+  const f = await fixture(t);
+  f.resources['standard.opf'] = Buffer.from(f.resources['standard.opf'].toString().replace('</manifest>', '<item id="fixed" href="style/fixed-layout-jp.css" media-type="text/css"/><item id="bridge" href="style/bridge.css" media-type="text/css"/><item id="safe" href="style/style-standard.css" media-type="text/css"/></manifest>'));
+  f.resources['style.css'] = Buffer.from('@import "style/bridge.css";');
+  f.resources['style/bridge.css'] = Buffer.from('@\\69mport "fixed-layout-jp.css";');
+  f.resources['style/fixed-layout-jp.css'] = Buffer.from('body{font-size:0}');
+  f.resources['style/style-standard.css'] = Buffer.from('body{font-size:1em}');
+  const { config, session } = await prepareSession(f.config, { fetchImpl: f.fetchImpl });
+  const src = f.capture.order[2];
+  f.capture.data[src] = f.capture.data[src].replace('</head>', '<link rel="stylesheet" href="../style.css"/></head>');
+  await writeFile(config.capturePath, JSON.stringify(f.capture));
+  const built = await buildHyreadEpub(config), { entries } = await readEpub(built.outputPath);
+  const safeOutput = entries['item/xhtml/body2.xhtml'].toString();
+  entries['item/xhtml/body2.xhtml'] = Buffer.from(entries['item/xhtml/body2.xhtml'].toString().replace('</head>', '<link rel="stylesheet" href="../style.css"/></head>'));
+  const epubPath = join(config.workDir, 'unsafe-styles.epub'); await writeEpub(epubPath, entries);
+  const result = await checkBuiltEpub({ config, session, capture: f.capture, epubPath });
+  assert.ok(result.issues.some((s) => /image-only CSS dependency/i.test(s)), JSON.stringify(result));
+  assert.doesNotMatch(safeOutput, /href="\.\.\/style\.css"/);
+  assert.match(safeOutput, /style-standard\.css/);
+  assert.deepEqual(entries['item/style.css'], f.resources['style.css']);
+  assert.deepEqual(entries['item/style/bridge.css'], f.resources['style/bridge.css']);
+  assert.deepEqual(entries['item/style/fixed-layout-jp.css'], f.resources['style/fixed-layout-jp.css']);
+});
+
+test('F1: rejecting an unsafe stylesheet without a safe replacement protects the old EPUB', async (t) => {
+  const f = await fixture(t), built = await buildHyreadEpub(f.config), old = await readFile(built.outputPath);
+  f.resources['standard.opf'] = Buffer.from(f.resources['standard.opf'].toString().replace('</manifest>', '<item id="fixed" href="style/fixed-layout-jp.css" media-type="text/css"/></manifest>'));
+  f.resources['style.css'] = Buffer.from('@import "style/fixed-layout-jp.css";');
+  f.resources['style/fixed-layout-jp.css'] = Buffer.from('body{font-size:0}');
+  const { config } = await prepareSession(f.config, { fetchImpl: f.fetchImpl });
+  f.capture.data[f.capture.order[2]] = f.capture.data[f.capture.order[2]].replace('</head>', '<link rel="stylesheet" href="../style.css"/></head>');
+  await writeFile(config.capturePath, JSON.stringify(f.capture));
+  await assert.rejects(buildHyreadEpub(config, { replace: true }), /safe.*stylesheet|image-only CSS dependency/i);
+  assert.deepEqual(await readFile(built.outputPath), old);
+});
+
+for (const [label, added] of [
+  ['escaped URL function', '<style>p{background-image:u\\72l("https://example.invalid/a.png")}</style>'],
+  ['escaped import', '<style>@\\69mport "https://example.invalid/a.css";</style>'],
+  ['escaped URL string', '<style>p{background-image:url("\\68ttps://example.invalid/a.png")}</style>'],
+  ['SVG fill', '<svg xmlns="http://www.w3.org/2000/svg"><rect fill="url(https://example.invalid/paint.svg#p)"/></svg>'],
+  ['SVG filter', '<svg xmlns="http://www.w3.org/2000/svg"><rect filter="u\\72l(blob:synthetic)"/></svg>'],
+]) test(`F2/CQ2: ${label} produces a dependency issue without relying on body differences`, async (t) => {
+  const f = await fixture(t), built = await buildHyreadEpub(f.config), { entries } = await readEpub(built.outputPath);
+  const target = 'item/xhtml/body1.xhtml';
+  entries[target] = Buffer.from(entries[target].toString().replace('</head>', `${added}</head>`));
+  const epubPath = join(f.config.workDir, 'remote-escaped.epub'); await writeEpub(epubPath, entries);
+  const result = await checkBuiltEpub({ config: f.config, session: f.session, capture: f.capture, epubPath });
+  assert.ok(result.issues.some((s) => /dependency/i.test(s) && /remote|blob|query/i.test(s)), JSON.stringify(result));
+});
+
+test('F3: safe dot-prefixed OPF hrefs build while preserving OPF bytes beyond hdf removal', async (t) => {
+  const f = await fixture(t);
+  f.resources['standard.opf'] = Buffer.from(f.resources['standard.opf'].toString().replaceAll('href="', 'href="./'));
+  const { config } = await prepareSession(f.config, { fetchImpl: f.fetchImpl });
+  await writeFile(config.capturePath, JSON.stringify(f.capture));
+  const built = await buildHyreadEpub(config), { entries } = await readEpub(built.outputPath);
+  assert.equal(built.report.ok, true);
+  assert.match(entries['item/standard.opf'].toString(), /href="\.\/xhtml\/body1.xhtml"/);
+});
+
+for (const [label, mutate] of [
+  ['multiple roots', (s) => s + '<extra/>'],
+  ['undeclared entity', (s) => s.replace('</head>', '<meta content="&undefined;"/></head>')],
+  ['CDATA outside root', (s) => s + '<![CDATA[outside]]>'],
+  ['undeclared namespace', (s) => s.replace('</head>', '<unknown:meta/></head>')],
+]) test(`CQ1: ${label} produces a specific XML issue while body text stays equal`, async (t) => {
+  const f = await fixture(t), built = await buildHyreadEpub(f.config), { entries } = await readEpub(built.outputPath);
+  entries['item/xhtml/body1.xhtml'] = Buffer.from(mutate(entries['item/xhtml/body1.xhtml'].toString()));
+  const epubPath = join(f.config.workDir, 'invalid-document.epub'); await writeEpub(epubPath, entries);
+  const result = await checkBuiltEpub({ config: f.config, session: f.session, capture: f.capture, epubPath });
+  assert.equal(result.rawTextEqual, true);
+  assert.ok(result.issues.some((s) => /invalid XML/i.test(s)), JSON.stringify(result));
+});
+
+test('CQ3: stylesheet filenames in text/comments are harmless and external hyperlinks remain valid', async (t) => {
+  const f = await fixture(t), src = f.capture.order[1];
+  f.capture.data[src] = f.capture.data[src].replace('</body>', '<!-- fixed-layout-jp.css --><p>fixed-layout-jp.css <a href="https://example.invalid/book">外部連結</a></p></body>');
+  await writeFile(f.config.capturePath, JSON.stringify(f.capture));
+  const built = await buildHyreadEpub(f.config);
+  assert.equal(built.report.ok, true); assert.equal(built.report.rawTextEqual, true);
+});
+
+test('CSS URL tokens decode local escapes but ignore content strings and preserve resource bytes', async (t) => {
+  const f = await fixture(t);
+  f.resources['style.css'] = Buffer.from('p::before{content:"url(https://example.invalid/literal)"}p{background:u\\000072l("images/pixel\\2e png")}');
+  const { config } = await prepareSession(f.config, { fetchImpl: f.fetchImpl });
+  await writeFile(config.capturePath, JSON.stringify(f.capture));
+  const built = await buildHyreadEpub(config), { entries } = await readEpub(built.outputPath);
+  assert.equal(built.report.ok, true);
+  assert.deepEqual(entries['item/style.css'], f.resources['style.css']);
+});
+
+test('ambiguous CSS resource syntax is rejected with a dependency parse reason', async (t) => {
+  const f = await fixture(t), built = await buildHyreadEpub(f.config), { entries } = await readEpub(built.outputPath);
+  entries['item/xhtml/body1.xhtml'] = Buffer.from(entries['item/xhtml/body1.xhtml'].toString().replace('</head>', '<style>p{background:u\\72l("safe.png" unexpected)}</style></head>'));
+  const epubPath = join(f.config.workDir, 'ambiguous-css.epub'); await writeEpub(epubPath, entries);
+  const result = await checkBuiltEpub({ config: f.config, session: f.session, capture: f.capture, epubPath });
+  assert.ok(result.issues.some((s) => /dependency.*syntax|dependency.*parse/i.test(s)), JSON.stringify(result));
+});
+
+test('F1: unsafe configured text styles cannot silently fall back to an unstyled body', async (t) => {
+  const f = await fixture(t);
+  f.resources['standard.opf'] = Buffer.from(f.resources['standard.opf'].toString().replace('</manifest>', '<item id="fixed" href="style/fixed-layout-jp.css" media-type="text/css"/><item id="text" href="style/style-standard.css" media-type="text/css"/></manifest>'));
+  f.resources['style/style-standard.css'] = Buffer.from('@import "fixed-layout-jp.css";');
+  f.resources['style/fixed-layout-jp.css'] = Buffer.from('body{font-size:0}');
+  const { config } = await prepareSession(f.config, { fetchImpl: f.fetchImpl });
+  await writeFile(config.capturePath, JSON.stringify(f.capture));
+  await assert.rejects(buildHyreadEpub(config), /safe.*stylesheet|image-only CSS dependency/i);
+});
+
+test('existing XHTML doctype is retained once when adding an XML declaration', async (t) => {
+  const f = await fixture(t), src = f.capture.order[1];
+  f.capture.data[src] = '<!DOCTYPE html>\n' + f.capture.data[src];
+  await writeFile(f.config.capturePath, JSON.stringify(f.capture));
+  const built = await buildHyreadEpub(f.config), { entries } = await readEpub(built.outputPath);
+  assert.equal(built.report.ok, true);
+  assert.equal((entries['item/xhtml/body1.xhtml'].toString().match(/<!DOCTYPE/g) ?? []).length, 1);
+});
