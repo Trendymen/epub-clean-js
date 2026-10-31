@@ -4,6 +4,10 @@ import { join } from 'node:path';
 import { resolveHyreadConfig } from '../../hyread/config.mjs';
 import { spawn } from 'node:child_process';
 
+export function absoluteHyreadCapture(capture, itemBase) {
+  return { ...capture, order: capture.order.map((href) => new URL(href, itemBase).href), data: Object.fromEntries(Object.entries(capture.data).map(([href, html]) => [new URL(href, itemBase).href, html])) };
+}
+
 export async function createHyreadFixture(options = {}) {
   const { temporaryParent = tmpdir(), ...configOptions } = options;
   const temporary = await mkdtemp(join(temporaryParent, 'hyread-session-'));
