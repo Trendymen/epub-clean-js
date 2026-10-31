@@ -211,17 +211,22 @@ function extractBody(anchor, document) {
   const target = document.getElementById(targetId);
   if (!target) return { text: '', bodyHtml: null };
 
-  const source = target.querySelector('li') || target;
+  const container = target.closest('aside') || target;
+  const source = container.querySelector('li') || container;
   const body = document.createElement('div');
   body.innerHTML = source.tagName === 'P' ? source.outerHTML : source.innerHTML;
+  for (const node of body.querySelectorAll('[id]')) {
+    if (node.id === targetId) node.removeAttribute('id');
+  }
   const textNodes = (node) => node.nodeType === 3 ? [node]
     : [...node.childNodes].flatMap(textNodes);
   const firstText = textNodes(body).find((node) => node.textContent.trim());
   const backlink = firstText?.parentElement?.closest('a');
   const hasBacklink = backlink?.getAttribute('href') === `#${anchor.id}`
-    && /^注\d*$/.test(backlink.textContent.trim());
+    && /^注\d*\s*[:：]?$/.test(backlink.textContent.trim());
   if (hasBacklink) backlink.remove();
-  const prefix = body.textContent.match(hasBacklink ? /^\s*[:：]\s*/ : /^\s*注\d*[:：]\s*/)?.[0];
+  const prefix = (hasBacklink || !backlink)
+    ? body.textContent.match(hasBacklink ? /^\s*[:：]\s*/ : /^\s*注\d*[:：]\s*/)?.[0] : null;
   let remaining = prefix?.length || 0;
   for (const node of textNodes(body)) {
     if (!remaining) break;
@@ -282,16 +287,58 @@ export function upgradeFootnotes(xhtml, opts = {}) {
   if (anchors.length === 0) return xhtml;
 
   // pre-pass 收集所有 anchor + body（避免遍历过程中 DOM 变化导致 querySelector 失效）
-  const items = anchors.map((anchor) => ({ anchor, ...extractBody(anchor, document) }));
+  const items = anchors.map((anchor) => ({
+    anchor,
+    target: document.getElementById(anchor.getAttribute('href').slice(1)),
+    ...extractBody(anchor, document),
+  }));
 
   // 删除原 aside 块（避免新旧并存）
   for (const a of [...document.querySelectorAll('aside')]) a.remove();
+  for (const { target } of items) {
+    if (target && !target.closest('aside')) target.remove();
+  }
+
+  const retainedIds = new Set([...document.querySelectorAll('[id]')]
+    .filter((node) => !anchors.some((anchor) => anchor === node || anchor.contains(node)))
+    .map((node) => node.id));
+  for (const item of items) {
+    if (item.bodyHtml === null) continue;
+    const body = document.createElement('div');
+    body.innerHTML = item.bodyHtml;
+    for (const node of body.querySelectorAll('[id]')) retainedIds.add(node.id);
+    item.body = body;
+  }
+  const movedIds = new Map();
+  let nextNumber = 1;
+  for (const item of items) {
+    while (retainedIds.has(`note${String(nextNumber).padStart(3, '0')}`)
+      || retainedIds.has(`note_ref${String(nextNumber).padStart(3, '0')}`)) nextNumber++;
+    item.number = nextNumber++;
+    const padded = String(item.number).padStart(3, '0');
+    if (item.anchor.id) movedIds.set(item.anchor.id, `note_ref${padded}`);
+    if (item.target?.id && !retainedIds.has(item.target.id)) movedIds.set(item.target.id, `note${padded}`);
+    const containerId = item.target?.closest('aside')?.id;
+    if (containerId && !retainedIds.has(containerId)) movedIds.set(containerId, `note${padded}`);
+  }
+  const remapLinks = (root) => {
+    for (const link of root.querySelectorAll('a[href^="#"]')) {
+      const target = movedIds.get(link.getAttribute('href').slice(1));
+      if (target) link.setAttribute('href', `#${target}`);
+    }
+  };
+  remapLinks(document);
+  for (const item of items) {
+    if (!item.body) continue;
+    remapLinks(item.body);
+    item.bodyHtml = item.body.innerHTML;
+  }
 
   const asides = [];
   for (let i = 0; i < items.length; i++) {
-    const { anchor, text, bodyHtml } = items[i];
+    const { anchor, text, bodyHtml, number } = items[i];
     const imgFilename = pickIcon(text, opts);
-    const [refHtml, plainAsideHtml] = buildSteraFootnote({ text, imgFilename }, i + 1, opts);
+    const [refHtml, plainAsideHtml] = buildSteraFootnote({ text, imgFilename }, number, opts);
     const asideHtml = bodyHtml === null ? plainAsideHtml
       : plainAsideHtml.replace(/<p>[\s\S]*?<\/p>/, () => bodyHtml);
 

@@ -5,6 +5,56 @@ import { normalizeFootnoteIds, upgradeFootnotes } from '../../../src/core/stages
 
 import { buildSteraFootnote } from '../../../books/yimei-seikatsu/migrate/footnote-cleaner.js';
 
+test('upgrading paragraph targets preserves ruby and remaps links across multiple reordered note IDs', () => {
+  const input = '<html><body><p>正文<sup><a class="calibre-footnote" href="#note003" id="old_a">注</a></sup><sup><a class="calibre-footnote" href="#note001" id="old_b">注</a></sup><sup><a class="calibre-footnote" href="#note002" id="old_c">注</a></sup>结尾</p><nav><a href="#note003">第一注</a><a href="#note001">第二注</a><a href="#note002">第三注</a></nav><p id="note003"><ruby>水星<rt>Mercury</rt></ruby>第一注。</p><aside id="old_container"><p id="note001"><ruby>金星<rt>Venus</rt></ruby>第二注。</p><p id="retained_detail">后段。</p></aside><p id="note002"><ruby>地球<rt>Earth</rt></ruby>第三注。</p></body></html>';
+  const output = upgradeFootnotes(input);
+  const { document } = parseHTML(output);
+  const ids = [...document.querySelectorAll('[id]')].map((node) => node.id);
+  assert.equal(ids.length, new Set(ids).size);
+  for (const anchor of document.querySelectorAll('a[href^="#"]')) assert.ok(document.getElementById(anchor.getAttribute('href').slice(1)));
+  assert.deepEqual([...document.querySelectorAll('nav a')].map((a) => document.getElementById(a.getAttribute('href').slice(1)).textContent), ['水星Mercury第一注。', '金星Venus第二注。后段。', '地球Earth第三注。']);
+  assert.equal(document.querySelectorAll('ruby').length, 3);
+  assert.equal(document.querySelector('body > p').textContent, '正文结尾');
+  assert.deepEqual([...document.querySelectorAll('img')].map((img) => img.getAttribute('zy-footnote')), ['水星（Mercury）第一注。', '金星（Venus）第二注。\n后段。', '地球（Earth）第三注。']);
+  assert.equal(upgradeFootnotes(output), output);
+});
+
+test('upgrading notes allocates IDs around retained paragraph IDs and keeps every paragraph', () => {
+  const input = '<html><body><p>正文<sup><a class="calibre-footnote" href="#old_note" id="old_ref">注</a></sup></p><aside id="old_note"><p id="note001"><ruby>水星<rt>Mercury</rt></ruby>第一段。</p><p id="note_ref002">第二段。</p></aside><a href="#note001">正文链接</a></body></html>';
+  const output = upgradeFootnotes(input);
+  const { document } = parseHTML(output);
+  const ids = [...document.querySelectorAll('[id]')].map((node) => node.id);
+  assert.equal(ids.length, new Set(ids).size);
+  for (const anchor of document.querySelectorAll('a[href^="#"]')) assert.ok(document.getElementById(anchor.getAttribute('href').slice(1)));
+  assert.equal(document.querySelector('aside').textContent, '水星Mercury第一段。第二段。');
+  assert.equal(document.getElementById('note001').tagName, 'P');
+  assert.equal(document.querySelector('img').getAttribute('zy-footnote'), '水星（Mercury）第一段。\n第二段。');
+  assert.equal(upgradeFootnotes(output), output);
+});
+
+for (const label of ['注12：</a>', '<span>注12：</span></a>', '<span>注12</span></a>：']) {
+  test(`upgrade removes only a leading original backlink with label ${label}`, () => {
+    const input = `<html><body><p>正文<sup><a class="calibre-footnote" href="#old_note" id="old_ref">注</a></sup></p><aside id="old_note"><p><span><a href="#old_ref">${label}</span><ruby>水星<rt>Mercury</rt></ruby>正文。</p><p>后段<a href="#old_ref">阅读正文</a>。</p></aside><p id="body_target">正文目标。</p></body></html>`;
+    const output = upgradeFootnotes(input);
+    const { document } = parseHTML(output);
+    assert.equal(document.querySelector('aside').textContent, '水星Mercury正文。后段阅读正文。');
+    assert.equal(document.querySelector('aside a').textContent, '阅读正文');
+    for (const anchor of document.querySelectorAll('a[href^="#"]')) assert.ok(document.getElementById(anchor.getAttribute('href').slice(1)));
+    assert.doesNotMatch(output, /old_ref|注12/);
+    assert.equal(upgradeFootnotes(output), output);
+  });
+}
+
+test('upgrade keeps a leading body link that contains more than an old note label', () => {
+  const input = '<html><body><p>正文<sup><a class="calibre-footnote" href="#old_note" id="old_ref">注</a></sup></p><aside id="old_note"><p><a href="#old_ref">注12：正文链接</a><ruby>水星<rt>Mercury</rt></ruby>说明。</p><p><a href="#body_target">注13：</a>仍是正文链接。</p></aside><p id="body_target">正文目标。</p></body></html>';
+  const output = upgradeFootnotes(input);
+  const { document } = parseHTML(output);
+  assert.deepEqual([...document.querySelectorAll('aside a')].map((a) => a.textContent), ['注12：正文链接', '注13：']);
+  assert.equal(document.querySelector('aside').textContent, '注12：正文链接水星Mercury说明。注13：仍是正文链接。');
+  for (const anchor of document.querySelectorAll('a[href^="#"]')) assert.ok(document.getElementById(anchor.getAttribute('href').slice(1)));
+  assert.equal(upgradeFootnotes(output), output);
+});
+
 for (const rubyFirst of [true, false]) {
   test(`upgrade preserves every note paragraph with ruby ${rubyFirst ? 'first' : 'later'} and a full fallback`, () => {
     const ruby = '<ruby>水星<rt>Mercury &amp; &lt;reading&gt;</rt></ruby>';
