@@ -234,3 +234,23 @@ for (const unavailable of ['missing.epub', '.']) test(`unavailable EPUB ${unavai
   assert.equal(report.ok, false); assert.equal(report.checks.structure.status, 'failed');
   assert.equal(report.checks.capture.status, 'not-run'); assert.equal(report.perDocument.length, 0);
 });
+
+for (const [name, diagnostic] of [
+  ['compact JSON', '["https://example.invalid/item/file","https://account:PRIVATE_ADJACENT@example.invalid/item/file"]'],
+  ['adjacent angle brackets', '<https://example.invalid/item/file>,<https://account:PRIVATE_ANGLE@example.invalid/item/file>'],
+  ['unseparated URL candidates', 'https://example.invalid/item/file,https://account):PRIVATE_JOINED@example.invalid/item/(file)?data=PRIVATE_DATA'],
+  ['invalid first URL and a second credential', 'https://[invalid)host/item?data=PRIVATE_INVALID,<https://account:PRIVATE_SECOND@example.invalid/item/file>'],
+]) test(`report redaction does not merge credentials from ${name}`, async (t) => {
+  const f = await fixture(t); f.audit.meta.restoration.error = diagnostic;
+  const auditBefore = JSON.stringify(f.audit), captureBefore = JSON.stringify(f.capture);
+  const report = await verifyHyreadEpub(f);
+  assert.equal(report.ok, true);
+  assert.doesNotMatch(JSON.stringify(report), /PRIVATE_|account|data=/u);
+  assert.equal(report.perDocument[1].src, f.capture.order[1]);
+  assert.equal(report.perDocument[1].spineIndex, 1);
+  const paths = await writeVerificationReports(report, join(f.config.workDir, 'adjacent-url-report.json'));
+  const saved = JSON.parse(await readFile(paths.jsonPath, 'utf8'));
+  assert.equal(saved.perDocument[1].src, f.capture.order[1]);
+  for (const path of [paths.jsonPath, paths.markdownPath]) assert.doesNotMatch(await readFile(path, 'utf8'), /PRIVATE_|account|data=/u);
+  assert.equal(JSON.stringify(f.audit), auditBefore); assert.equal(JSON.stringify(f.capture), captureBefore);
+});

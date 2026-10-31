@@ -4,6 +4,7 @@ import { writeFileAtomic, safeRelativePath } from './paths.mjs';
 
 export function sanitizeEvidence(value) {
   if (typeof value === 'string') return value.replace(/https?:\/\/\S+/giu, (source) => {
+    if (/https?:\/\/.*https?:\/\//iu.test(source)) return '[已移除复合地址]';
     try {
       const url = new URL(source);
       if (/\.jsp$/iu.test(url.pathname)) return '[已移除阅读器地址]';
