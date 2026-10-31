@@ -135,15 +135,20 @@ export function buildSteraFootnote(fn, newIdNumber, opts = {}) {
 }
 
 export function normalizeFootnoteIds(xhtml) {
-  return xhtml.replace(/<aside\b[^>]*>[\s\S]*?<\/aside>/gi, (aside) => {
+  return xhtml.replace(/<aside\b(?:[^>"']|"[^"]*"|'[^']*')*>[\s\S]*?<\/aside>/gi, (aside) => {
     const { document } = parseHTML(aside);
     const node = document.querySelector('aside');
     if (node?.getAttribute('epub:type') !== 'footnote' || !node.id) return aside;
-    return aside.replace(/<li\b[^>]*>/gi, (tag) => {
+    return aside.replace(/<li\b((?:[^>"']|"[^"]*"|'[^']*')*)>/gi, (tag, attributes) => {
       const { document: fragment } = parseHTML(tag + '</li>');
       const li = fragment.querySelector('li');
       if (!li?.classList.contains('duokan-footnote-item') || li.id !== node.id) return tag;
-      return tag.replace(/\s+id\s*=\s*(?:"[^"]*"|'[^']*')/i, '');
+      for (const attr of attributes.matchAll(/\s+([^\s=/>]+)(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?/g)) {
+        if (attr[1].toLowerCase() !== 'id') continue;
+        const start = 3 + attr.index;
+        return tag.slice(0, start) + tag.slice(start + attr[0].length);
+      }
+      return tag;
     });
   });
 }
@@ -197,21 +202,47 @@ function findAnchors(document) {
  * 抽取锚点对应的脚注正文（按 href #id 找配对的 aside / li / section / note 元素）。
  * @param {Element} anchor
  * @param {Document} document
- * @returns {string}
+ * @returns {{ text: string, bodyHtml: string|null }}
  */
 function extractBody(anchor, document) {
   const href = anchor.getAttribute('href') || '';
-  if (!href.startsWith('#')) return '';
+  if (!href.startsWith('#')) return { text: '', bodyHtml: null };
   const targetId = href.slice(1);
   const target = document.getElementById(targetId);
-  if (!target) return '';
+  if (!target) return { text: '', bodyHtml: null };
 
-  // 优先取 li/p 的文本，回退到整个 target 的 textContent。
-  // 这样可以避免把内嵌反向链接（"注1："）也一并吸进去。
-  const innerP = target.querySelector?.('li p, li, p');
-  const raw = (innerP ? innerP.textContent : target.textContent) || '';
-  // 移除可能存在的旧版反向链接前缀（如 "注1：" / "注：" / 数字标号）
-  return raw.replace(/^\s*注\d*[:：]\s*/, '').trim();
+  const source = target.querySelector('li') || target;
+  const body = document.createElement('div');
+  body.innerHTML = source.tagName === 'P' ? source.outerHTML : source.innerHTML;
+  const textNodes = (node) => node.nodeType === 3 ? [node]
+    : [...node.childNodes].flatMap(textNodes);
+  const firstText = textNodes(body).find((node) => node.textContent.trim());
+  const backlink = firstText?.parentElement?.closest('a');
+  const hasBacklink = backlink?.getAttribute('href') === `#${anchor.id}`
+    && /^注\d*$/.test(backlink.textContent.trim());
+  if (hasBacklink) backlink.remove();
+  const prefix = body.textContent.match(hasBacklink ? /^\s*[:：]\s*/ : /^\s*注\d*[:：]\s*/)?.[0];
+  let remaining = prefix?.length || 0;
+  for (const node of textNodes(body)) {
+    if (!remaining) break;
+    const length = node.textContent.length;
+    node.textContent = node.textContent.slice(remaining);
+    remaining = Math.max(0, remaining - length);
+  }
+  const plainText = (node) => {
+    if (node.nodeType === 3) return node.textContent;
+    if (node.tagName === 'RUBY') {
+      const base = [...node.childNodes].filter((child) => !['RT', 'RP'].includes(child.tagName))
+        .map(plainText).join('');
+      const reading = [...node.querySelectorAll('rt')].map((rt) => rt.textContent).join(' ');
+      return `${base}（${reading}）`;
+    }
+    return [...node.childNodes].map(plainText).join('') + (node.tagName === 'P' ? '\n' : '');
+  };
+  const text = plainText(body).trim();
+  const preserveHtml = body.querySelector('ruby') || body.querySelectorAll('p').length > 1;
+  const html = body.innerHTML.trim();
+  return { text, bodyHtml: preserveHtml ? (body.querySelector('p') ? html : `<p>${html}</p>`) : null };
 }
 
 /**
@@ -251,17 +282,7 @@ export function upgradeFootnotes(xhtml, opts = {}) {
   if (anchors.length === 0) return xhtml;
 
   // pre-pass 收集所有 anchor + body（避免遍历过程中 DOM 变化导致 querySelector 失效）
-  const items = anchors.map((anchor) => {
-    const target = document.getElementById(anchor.getAttribute('href').slice(1));
-    const paragraph = target?.querySelector('li p, p');
-    return {
-      anchor,
-      text: paragraph?.querySelector('ruby')
-        ? (anchor.querySelector('img')?.getAttribute('zy-footnote') || extractBody(anchor, document))
-        : extractBody(anchor, document),
-      bodyHtml: paragraph?.querySelector('ruby') ? paragraph.innerHTML : null,
-    };
-  });
+  const items = anchors.map((anchor) => ({ anchor, ...extractBody(anchor, document) }));
 
   // 删除原 aside 块（避免新旧并存）
   for (const a of [...document.querySelectorAll('aside')]) a.remove();
@@ -272,7 +293,7 @@ export function upgradeFootnotes(xhtml, opts = {}) {
     const imgFilename = pickIcon(text, opts);
     const [refHtml, plainAsideHtml] = buildSteraFootnote({ text, imgFilename }, i + 1, opts);
     const asideHtml = bodyHtml === null ? plainAsideHtml
-      : plainAsideHtml.replace(/<p>[\s\S]*?<\/p>/, () => `<p>${bodyHtml}</p>`);
+      : plainAsideHtml.replace(/<p>[\s\S]*?<\/p>/, () => bodyHtml);
 
     // 替换锚点（连同外层 sub/sup 一并替换，避免出现嵌套 sub）
     let replaceTarget = anchor;

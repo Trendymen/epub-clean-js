@@ -1,9 +1,50 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
-import { upgradeFootnotes } from '../../../src/core/stages/footnote-fix.js';
+import { normalizeFootnoteIds, upgradeFootnotes } from '../../../src/core/stages/footnote-fix.js';
 
 import { buildSteraFootnote } from '../../../books/yimei-seikatsu/migrate/footnote-cleaner.js';
+
+for (const rubyFirst of [true, false]) {
+  test(`upgrade preserves every note paragraph with ruby ${rubyFirst ? 'first' : 'later'} and a full fallback`, () => {
+    const ruby = '<ruby>水星<rt>Mercury &amp; &lt;reading&gt;</rt></ruby>';
+    const paragraphs = rubyFirst ? `<p>${ruby}第一段。</p><p>第二段不能删除。</p>` : `<p>第一段不能删除。</p><p>${ruby}第二段。</p>`;
+    const input = `<html><body><p>正文<sup><a class="calibre-footnote" href="#old_note" id="old_ref">注</a></sup>结尾</p><aside id="old_note"><ol><li>${paragraphs}</li></ol></aside></body></html>`;
+    const output = upgradeFootnotes(input);
+    const { document } = parseHTML(output);
+    const note = document.querySelector('aside');
+    assert.equal(note.querySelectorAll('p').length, 2);
+    assert.equal(note.querySelector('ruby').outerHTML, ruby);
+    assert.equal(note.textContent, rubyFirst ? '水星Mercury & <reading>第一段。第二段不能删除。' : '第一段不能删除。水星Mercury & <reading>第二段。');
+    assert.equal(document.querySelector('img').getAttribute('zy-footnote'), rubyFirst ? '水星（Mercury & <reading>）第一段。\n第二段不能删除。' : '第一段不能删除。\n水星（Mercury & <reading>）第二段。');
+    assert.equal(document.querySelector('body > p').textContent, '正文结尾');
+    assert.equal(upgradeFootnotes(output), output);
+  });
+}
+
+test('upgrade removes an old backlink and note prefix while preserving ruby and new fragment targets', () => {
+  const input = '<html><body><p>正文<sup><a class="calibre-footnote" href="#old_note" id="old_ref">注</a></sup>结尾</p><aside id="old_note"><p><a href="#old_ref">注12</a>：<ruby>水星<rt>Mercury</rt></ruby>正文 &amp; 结尾。</p><p>后段。</p></aside></body></html>';
+  const output = upgradeFootnotes(input);
+  const { document } = parseHTML(output);
+  assert.equal(document.querySelector('aside').textContent, '水星Mercury正文 & 结尾。后段。');
+  assert.equal(document.querySelector('img').getAttribute('zy-footnote'), '水星（Mercury）正文 & 结尾。\n后段。');
+  assert.doesNotMatch(output, /old_ref|注12|<p>：/);
+  for (const anchor of document.querySelectorAll('a[href^="#"]')) assert.ok(document.getElementById(anchor.getAttribute('href').slice(1)));
+  assert.equal(upgradeFootnotes(output), output);
+});
+
+test('normalizing IDs removes only the real duplicate attribute across quoted id text and greater-than signs', () => {
+  for (const [attrs, expectedAttrs] of [
+    [String.raw` title=' id="tip"' id="note001"`, String.raw` title=' id="tip"'`],
+    [String.raw` title='before > id="tip"' data-other="a > b" id='note001'`, String.raw` title='before > id="tip"' data-other="a > b"`],
+  ]) {
+    const input = `<html><body><aside epub:type="footnote" title="aside > title" id="note001"><ol><li class="duokan-footnote-item"${attrs}><p>正文 &amp; <ruby>水星<rt>Mercury</rt></ruby></p></li></ol></aside></body></html>`;
+    const expected = input.replace(attrs, expectedAttrs);
+    assert.equal(normalizeFootnoteIds(input), expected);
+    assert.equal(normalizeFootnoteIds(expected), expected);
+    assert.equal(parseHTML(expected).document.querySelectorAll('[id="note001"]').length, 1);
+  }
+});
 
 test('generated footnotes have one target per href', () => {
   const [ref, aside] = buildSteraFootnote({ body: '注释正文' }, 1);

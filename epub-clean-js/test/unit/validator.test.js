@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { writeEpub } from '../../src/core/zip-io.js';
 import { validateOutput } from '../../src/core/validator.js';
 
-async function validate(t, overrides = {}, { ncx = true, identifier = 'publication' } = {}) {
+async function validate(t, overrides = {}, { ncx = true, identifier = 'publication', uid = 'urn:book:one' } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'epub-validator-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const files = {
@@ -18,6 +18,9 @@ async function validate(t, overrides = {}, { ncx = true, identifier = 'publicati
     ...(ncx ? { 'OPS/toc.ncx': '<ncx><head><meta name="dtb:uid" content="urn:book:one"/></head><navMap><navPoint><content src="one.xhtml#段落"/></navPoint></navMap></ncx>' } : {}),
     ...overrides,
   };
+  for (const name of ['OPS/book.opf', 'OPS/toc.ncx']) {
+    if (files[name]) files[name] = files[name].replaceAll('urn:book:one', uid);
+  }
   const out = join(dir, 'book.epub');
   await writeEpub(out, files);
   return validateOutput(out);
@@ -28,6 +31,28 @@ test('validator accepts encoded references and the package-selected identifier w
     const result = await validate(t, {}, { ncx });
     assert.deepEqual(result, { ok: true, issues: [], orphans: [], brokenLinks: [] });
   }
+});
+
+test('validator compares leading-zero and zero identifiers as text with and without NCX', async (t) => {
+  for (const uid of ['001234567890', '0']) {
+    for (const ncx of [true, false]) {
+      const result = await validate(t, {}, { uid, ncx });
+      assert.equal(result.ok, true, JSON.stringify(result));
+    }
+  }
+});
+
+test('validator decodes CSS url and import escapes before parsing URI components', async (t) => {
+  const css = String.raw`@import "extra\ style.css"; @import 'hex\20 style.css'; p { background: url(image\ one.png); mask: url(paren\(one\).png); border-image: url("uri\25 20image.png?cache=1"); list-style: url('hex\000020image.png'); cursor: url("continued\
+image.png"); }`;
+  const resources = ['extra style.css', 'hex style.css', 'image one.png', 'paren(one).png', 'uri image.png', 'hex image.png', 'continuedimage.png'];
+  const result = await validate(t, { 'OPS/style.css': css, ...Object.fromEntries(resources.map((name) => [`OPS/${name}`, ''])) });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const missing = await validate(t, { 'OPS/style.css': String.raw`@import "absent\ style.css"; p{background:url(absent\20 image.png)}` });
+  assert.equal(missing.ok, false);
+  assert.equal(missing.brokenLinks.length, 2);
+  assert.match(missing.brokenLinks.join('\n'), /absent style.css/);
+  assert.match(missing.brokenLinks.join('\n'), /absent image.png/);
 });
 
 test('validator rejects duplicate XHTML IDs', async (t) => {

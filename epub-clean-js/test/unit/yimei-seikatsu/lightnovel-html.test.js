@@ -5,6 +5,9 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { XMLParser } from 'fast-xml-parser';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 
 import {
   buildLightNovelEpub,
@@ -18,6 +21,28 @@ import { rubyAnnotationsForVolume } from '../../../src/entries/lightnovel-html-s
 import { readEpub, writeEpub } from '../../../src/core/zip-io.js';
 import { parseHyreadEpubToBook, parseAnotherDaysEpubToBook } from '../../../books/yimei-seikatsu/hyread-parser.js';
 import { writeHyreadFixture, bodyParagraph as hyreadP } from '../../helpers/hyread-fixture.js';
+
+for (const mode of ['write', 'rename']) {
+  test(`builder propagates ${mode} failures, preserves the existing output and removes staging files`, async (t) => {
+    const dir = await mkdtemp(join(tmpdir(), 'ln-write-fault-'));
+    t.after(() => rm(dir, { recursive: true, force: true }));
+    const source = join(dir, 'source.epub');
+    const ref = join(dir, 'ref.epub');
+    const out = join(dir, 'out.epub');
+    await writeHyreadFixture(source, { pages: { 'p-001.xhtml': hyreadP('正文') } });
+    await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
+    const previous = Buffer.from('existing output must survive');
+    await writeFile(out, previous);
+    const fixture = fileURLToPath(new URL('../../helpers/build-write-fault.mjs', import.meta.url));
+    await assert.rejects(promisify(execFile)(process.execPath, [fixture, mode, source, ref, out]), (error) => {
+      assert.equal(error.code, 1);
+      assert.match(error.stderr, new RegExp(`injected staging ${mode} failure`));
+      return true;
+    });
+    assert.deepEqual(await readFile(out), previous);
+    assert.deepEqual((await readdir(dir)).sort(), ['out.epub', 'ref.epub', 'source.epub']);
+  });
+}
 
 test('builder shares its UUID, normalizes imported note IDs and preserves an existing output on invalid references', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'ln-integrity-'));

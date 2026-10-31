@@ -13,6 +13,7 @@ const parser = new XMLParser({
   attributeNamePrefix: "",
   preserveOrder: true,
   parseAttributeValue: false,
+  parseTagValue: false,
   trimValues: false,
   processEntities: true,
 });
@@ -167,9 +168,17 @@ export async function validateOutput(epubPath) {
     }
   };
   const checkCss = (name, css) => {
-    const text = css.replace(/\/\*[\s\S]*?\*\//g, '');
-    for (const match of text.matchAll(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*?))\s*\)|@import\s+(?:"([^"]*)"|'([^']*)')/gi)) {
-      checkReference(name, match.slice(1).find((value) => value !== undefined));
+    const tokens = /\/\*[\s\S]*?\*\/|url\(\s*(?:"((?:\\[\s\S]|[^"\\])*)"|'((?:\\[\s\S]|[^'\\])*)'|((?:\\[\s\S]|[^)\\])*?))\s*\)|@import\s+(?:"((?:\\[\s\S]|[^"\\])*)"|'((?:\\[\s\S]|[^'\\])*)')|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'/gi;
+    for (const match of css.matchAll(tokens)) {
+      const value = match.slice(1).find((capture) => capture !== undefined);
+      if (value === undefined) continue;
+      const decoded = value.replace(/\\(?:([0-9a-f]{1,6})(?:\r\n|[\t\n\f\r ])?|(\r\n|[\n\r\f])|([\s\S]))/gi, (_escape, hex, newline, char) => {
+        if (newline) return '';
+        if (!hex) return char;
+        const codepoint = parseInt(hex, 16);
+        return String.fromCodePoint(!codepoint || codepoint > 0x10ffff || (codepoint >= 0xd800 && codepoint <= 0xdfff) ? 0xfffd : codepoint);
+      });
+      checkReference(name, decoded);
     }
   };
   for (const [name, tree] of trees) {
@@ -192,7 +201,7 @@ export async function validateOutput(epubPath) {
   const packageNode = findFirst(opfTree, 'package');
   const identifierId = getAttr(packageNode, 'unique-identifier');
   const identifierNode = findAll(opfTree, 'dc:identifier').find((node) => getAttr(node, 'id') === identifierId);
-  const identifier = (childrenOf(identifierNode) || []).map((node) => node['#text'] || '').join('').trim();
+  const identifier = (childrenOf(identifierNode) || []).map((node) => node['#text'] ?? '').join('').trim();
   if (!identifierId || !identifier) issues.push('OPF unique-identifier 未指向有效标识');
   for (const [name, tree] of trees) {
     if (!/\.ncx$/i.test(name)) continue;
