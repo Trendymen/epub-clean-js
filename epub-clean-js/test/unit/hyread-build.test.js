@@ -4,14 +4,14 @@ import { readFile, writeFile, readdir, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createHyreadFixture, absoluteHyreadCapture } from '../helpers/hyread-fixtures.mjs';
 import { prepareSession, loadSession } from '../../hyread/lib/session.mjs';
-import { buildHyreadEpub, checkBuiltEpub } from '../../hyread/lib/build.mjs';
+import { buildHyreadEpub, checkBuiltEpub, classifyValidatorReferences } from '../../hyread/lib/build.mjs';
 import { normalizeText, inspectXhtml, applyApprovedCorrections } from '../../hyread/lib/content.mjs';
 import { readEpub, writeEpub } from '../../src/core/zip-io.js';
 
 async function fixture(t, options = {}) {
   const f = await createHyreadFixture(options);
   t.after(f.cleanup);
-  f.resources['standard.opf'] = Buffer.from(f.opf.toString().replace('<metadata/>', '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>合成書</dc:title><dc:identifier>synthetic</dc:identifier><dc:language>zh-TW</dc:language><meta property="hdf">private</meta></metadata>'));
+  f.resources['standard.opf'] = Buffer.from(f.opf.toString().replace('<metadata/>', '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>合成書</dc:title><dc:identifier id="book-id">synthetic</dc:identifier><dc:language>zh-TW</dc:language><meta property="hdf">private</meta></metadata>'));
   const { config, session } = await prepareSession(f.config, { fetchImpl: f.fetchImpl });
   const capture = absoluteHyreadCapture(f.capture, config.itemBase);
   await writeFile(config.capturePath, JSON.stringify(capture));
@@ -144,7 +144,7 @@ test('image-only SVG uses image CSS and mixed SVG page removes font-size-zero CS
 
 test('volume 08 output reports exact allowed changes and rejects a third change', async (t) => {
   const f = await createHyreadFixture({ volume: '08', assetId: '8a8a84ca8cf2eb56018d6786f66a472c' }); t.after(f.cleanup);
-  f.resources['standard.opf'] = Buffer.from(f.opf.toString().replace('xhtml/body1.xhtml', 'xhtml/p-toc-001.xhtml').replace('<metadata/>', '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>測試</dc:title><dc:identifier>test</dc:identifier><dc:language>zh-TW</dc:language></metadata>'));
+  f.resources['standard.opf'] = Buffer.from(f.opf.toString().replace('xhtml/body1.xhtml', 'xhtml/p-toc-001.xhtml').replace('<metadata/>', '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>測試</dc:title><dc:identifier id="book-id">test</dc:identifier><dc:language>zh-TW</dc:language></metadata>'));
   f.resources['xhtml/p-toc-001.xhtml'] = f.resources['xhtml/body1.xhtml'];
   const { config, session } = await prepareSession(f.config, { fetchImpl: f.fetchImpl });
   const relative = { order: f.capture.order.map((s) => s.replace('body1', 'p-toc-001')), data: { ...f.capture.data } };
@@ -326,9 +326,13 @@ for (const [label, inert] of [
   const built = await buildHyreadEpub(f.config), { entries } = await readEpub(built.outputPath);
   assert.equal(built.report.ok, true);
   assert.ok(entries['item/xhtml/body1.xhtml'].toString().includes(inert));
-  const ignored = built.report.ignoredNonElementReferences;
-  assert.ok(Array.isArray(ignored));
-  assert.deepEqual(ignored.map(({ file, reference, regionType }) => ({ file, reference, regionType })), [{ file: 'item/xhtml/body1.xhtml', reference: label === 'commented reader cleanup tags' ? 'blob:fake' : 'missing.css', regionType: label === 'CDATA missing link' ? 'cdata' : 'comment' }]);
+  assert.deepEqual(built.report.ignoredNonElementReferences, []);
+  assert.equal(built.report.stats.ignoredInertBrokenLinks, 0);
+  const reference = label === 'commented reader cleanup tags' ? 'blob:fake' : 'missing.css';
+  const classified = classifyValidatorReferences(entries, [`item/xhtml/body1.xhtml: 引用 ${reference} → item/xhtml/${reference} 不存在`]);
+  assert.deepEqual(classified.brokenLinks, []);
+  const ignored = classified.ignoredNonElementReferences;
+  assert.deepEqual(ignored.map(({ file, reference, regionType }) => ({ file, reference, regionType })), [{ file: 'item/xhtml/body1.xhtml', reference, regionType: label === 'CDATA missing link' ? 'cdata' : 'comment' }]);
   assert.ok(ignored.every((entry) => Number.isSafeInteger(entry.start) && entry.end > entry.start));
 });
 
@@ -353,7 +357,6 @@ test('CQ4: a real missing link identical to commented markup remains in validato
 test('CQ4: unknown validator diagnostics are retained alongside a proven inert reference', async (t) => {
   const f = await fixture(t), built = await buildHyreadEpub(f.config), { entries } = await readEpub(built.outputPath);
   entries['item/xhtml/body1.xhtml'] = Buffer.from(entries['item/xhtml/body1.xhtml'].toString().replace('</head>', '<!-- <link href="missing.css"/> --></head>'));
-  const { classifyValidatorReferences } = await import('../../hyread/lib/build.mjs');
   assert.equal(typeof classifyValidatorReferences, 'function');
   const result = classifyValidatorReferences(entries, ['item/xhtml/body1.xhtml: 引用 missing.css → item/xhtml/missing.css 不存在', 'future validator diagnostic: unknown format']);
   assert.deepEqual(result.brokenLinks, ['future validator diagnostic: unknown format']);
@@ -370,13 +373,13 @@ test('CQ4: a true CSS dependency identical to a commented link is never classifi
   assert.deepEqual(result.ignoredNonElementReferences, []);
 });
 
-test('B5: encoded CSS separators keep equivalent commented missing target in validator failures', async (t) => {
+test('B5: encoded CSS separators report the active reference and decoded missing target', async (t) => {
   const f = await fixture(t), built = await buildHyreadEpub(f.config), { entries } = await readEpub(built.outputPath);
   entries['item/xhtml/body1.xhtml'] = Buffer.from(entries['item/xhtml/body1.xhtml'].toString().replace('</head>', '<!-- <link href="dir/missing.css"/> --><style>p{background:url(dir%2Fmissing.css)}</style></head>'));
   const epubPath = join(f.config.workDir, 'encoded-css-and-inert-link.epub'); await writeEpub(epubPath, entries);
   const result = await checkBuiltEpub({ config: f.config, session: f.session, capture: f.capture, epubPath });
   assert.equal(result.ok, false);
-  assert.ok(result.issues.some((issue) => issue.includes('引用 dir/missing.css')), JSON.stringify(result));
+  assert.ok(result.issues.some((issue) => issue.includes('引用 dir%2Fmissing.css') && issue.includes('→ item/xhtml/dir/missing.css 不存在')), JSON.stringify(result));
   assert.ok(result.issues.some((issue) => /missing dependency dir%2Fmissing.css/.test(issue)));
   assert.deepEqual(result.ignoredNonElementReferences, []);
 });
@@ -397,5 +400,6 @@ for (const [label, allowed] of [
   assert.equal(built.report.rawTextEqual, true);
   assert.ok(entries['item/xhtml/body1.xhtml'].toString().includes(allowed));
   assert.ok(entries['item/xhtml/body1.xhtml'].toString().includes(inert));
-  assert.deepEqual(built.report.ignoredNonElementReferences.map(({ file, reference, regionType }) => ({ file, reference, regionType })), [{ file: 'item/xhtml/body1.xhtml', reference: 'missing.css', regionType: 'comment' }]);
+  assert.deepEqual(built.report.ignoredNonElementReferences, []);
+  assert.equal(built.report.stats.ignoredInertBrokenLinks, 0);
 });

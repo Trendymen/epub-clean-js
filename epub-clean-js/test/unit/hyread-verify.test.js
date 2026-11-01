@@ -11,7 +11,7 @@ import { writeVerificationReports, exportSemanticMaterial } from '../../hyread/l
 
 async function fixture(t, options = {}) {
   const f = await createHyreadFixture(options); t.after(f.cleanup);
-  f.resources['standard.opf'] = Buffer.from(f.opf.toString().replace('<metadata/>', '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>合成書</dc:title><dc:identifier>synthetic</dc:identifier><dc:language>zh-TW</dc:language></metadata>'));
+  f.resources['standard.opf'] = Buffer.from(f.opf.toString().replace('<metadata/>', '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>合成書</dc:title><dc:identifier id="book-id">synthetic</dc:identifier><dc:language>zh-TW</dc:language></metadata>'));
   f.resources['standard.opf'] = Buffer.from(f.resources['standard.opf'].toString().replace('xhtml/cover.xhtml', 'xhtml/p-cover.xhtml'));
   f.resources['xhtml/p-cover.xhtml'] = f.resources['xhtml/cover.xhtml'];
   f.capture.order[0] = 'xhtml/p-cover.xhtml';
@@ -209,16 +209,19 @@ test('volume 08 corrections apply only to output, raw audit remains strict and e
   assert.equal((await verifyHyreadEpub(f)).ok, false);
 });
 
-test('verification preserves proven inert-link diagnostics and removes reader credentials from reports', async (t) => {
+test('verification ignores commented links and removes reader credentials from reports', async (t) => {
   const f = await fixture(t);
-  f.capture.data[f.capture.order[1]] = f.capture.data[f.capture.order[1]].replace('</head>', '<!-- <link href="missing.css"/> --></head>');
+  const inert = '<!-- <link href="missing.css"/> -->';
+  f.capture.data[f.capture.order[1]] = f.capture.data[f.capture.order[1]].replace('</head>', `${inert}</head>`);
   await writeFile(f.config.capturePath, JSON.stringify(f.capture));
   f.epubPath = (await buildHyreadEpub(f.config, { replace: true })).outputPath;
+  const { entries } = await readEpub(f.epubPath);
+  assert.ok(entries['item/xhtml/body1.xhtml'].toString().includes(inert));
   f.audit.meta.restoration.error = 'https://account:secret@example.invalid/reader.jsp?data=private https://account:secret@example.invalid/item/file?token=private';
   const report = await verifyHyreadEpub(f);
   assert.equal(report.ok, true);
-  assert.equal(report.ignoredNonElementReferences.length, 1);
-  assert.equal(report.ignoredNonElementReferences[0].regionType, 'comment');
+  assert.deepEqual(report.ignoredNonElementReferences, []);
+  assert.equal(report.stats.ignoredInertBrokenLinks, 0);
   assert.doesNotMatch(JSON.stringify(report), /secret|private|account|data=/);
 });
 

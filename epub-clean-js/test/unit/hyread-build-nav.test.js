@@ -10,7 +10,7 @@ import { prepareSession } from '../../hyread/lib/session.mjs';
 
 test('HyRead nav derives chapter labels from its own synthetic capture and retains one afterword', async (t) => {
   const f = await createHyreadFixture(); t.after(f.cleanup);
-  f.resources['standard.opf'] = Buffer.from(f.opf.toString().replace('<metadata/>', '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>合成書</dc:title><dc:identifier>synthetic</dc:identifier><dc:language>zh-TW</dc:language></metadata>'));
+  f.resources['standard.opf'] = Buffer.from(f.opf.toString().replace('<metadata/>', '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>合成書</dc:title><dc:identifier id="book-id">synthetic</dc:identifier><dc:language>zh-TW</dc:language></metadata>'));
   f.capture.data['xhtml/body1.xhtml'] = '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>旧标签</title></head><body><p class="gfont">同日的另一個視角</p><p>合成正文。</p></body></html>';
   f.capture.data['xhtml/body2.xhtml'] = '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>旧标签</title></head><body><p class="gfont">後記</p><p>合成後記。</p></body></html>';
   const { config } = await prepareSession(f.config, { fetchImpl: f.fetchImpl });

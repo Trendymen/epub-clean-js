@@ -18,7 +18,7 @@ const json = async (path, value) => { await writeFile(path, JSON.stringify(value
 
 async function fixture(t) {
   const f = await createHyreadFixture(); t.after(f.cleanup);
-  f.resources['standard.opf'] = Buffer.from(f.opf.toString().replace('<metadata/>', '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>合成書</dc:title><dc:identifier>synthetic</dc:identifier><dc:language>zh-TW</dc:language></metadata>'));
+  f.resources['standard.opf'] = Buffer.from(f.opf.toString().replace('<metadata/>', '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>合成書</dc:title><dc:identifier id="book-id">synthetic</dc:identifier><dc:language>zh-TW</dc:language></metadata>'));
   const preload = join(dirname(f.config.workDir), 'fetch.mjs');
   const resources = Object.fromEntries(Object.entries(f.resources).map(([key, value]) => [new URL(key, f.config.itemBase).href, value.toString('base64')]));
   await writeFile(preload, `const resources = ${JSON.stringify(resources)}; globalThis.fetch = async (input) => { const url = String(input); if (!(url in resources)) throw new Error('Unexpected fixture URL'); const response = new Response(Buffer.from(resources[url], 'base64')); Object.defineProperty(response, 'url', {value:url}); return response; };`);
