@@ -14,6 +14,7 @@ import {
   buildLightNovelEpubFromBook,
   extractArticleHtml,
   parseLightNovelArticle,
+  parseLightNovelHtml,
   splitLightNovelBook,
   simplifyText,
 } from '../../../books/yimei-seikatsu/lightnovel-html/index.js';
@@ -407,6 +408,362 @@ const SOURCE_IMAGE_HTML = `<!doctype html>
 function sha256(buffer) {
   return createHash('sha256').update(buffer).digest('hex');
 }
+
+async function buildHtmlFixture(t, html, options = {}) {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-wording-ruby-'));
+  const originalFetch = globalThis.fetch;
+  t.after(async () => {
+    globalThis.fetch = originalFetch;
+    await rm(dir, { recursive: true, force: true });
+  });
+  const htmlPath = join(dir, 'source.html');
+  const refEpubPath = join(dir, 'ref.epub');
+  const outEpubPath = join(dir, 'out.epub');
+  await writeFile(htmlPath, html, 'utf8');
+  await writeEpub(refEpubPath, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
+  globalThis.fetch = async () => ({
+    ok: true, headers: { get: () => 'image/jpeg' }, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+  });
+  const events = [];
+  const result = await buildLightNovelEpub({
+    htmlPath, refEpubPath, outEpubPath, includeSpecials: false, ...options,
+    onDiagnostic: (event) => events.push(event),
+  });
+  return { ...result, htmlPath, events, epub: await readEpub(outEpubPath) };
+}
+
+test('HTML protects a rendered manual ruby match and reports its source block', async (t) => {
+  const html = SAMPLE_HTML.replace('暑假在昨天告終。', '𫫇智慧型手機Smartphone');
+  const rubyAnnotations = [{ text: '智慧型手机Smartphone', base: '智慧型手机', ruby: 'Smartphone' }];
+  const inlineEvents = [];
+  const parsed = parseLightNovelHtml(html, {
+    volume: '11', wording: 'mainland', rubyAnnotations, onDiagnostic: (event) => inlineEvents.push(event),
+  });
+  assert.equal(parsed.chapters[0].blocks[0].text, '𫫇智慧型手机Smartphone');
+  assert.deepEqual(inlineEvents, [{
+    volume: '11', source: '<inline>', paragraphIndex: 8, ruleId: 'smartphone', kind: 'text', start: 2, end: 7,
+  }]);
+  const { epub, events, htmlPath } = await buildHtmlFixture(t, html, { volume: '11', wording: 'mainland', rubyAnnotations });
+  const chapter = epub.entries['OEBPS/Text/chapter0001.xhtml'].toString('utf8');
+  assert.match(chapter, /𫫇<ruby>智慧型手机<rt>Smartphone<\/rt><\/ruby>/);
+  assert.deepEqual(events.find((event) => event.kind === 'text'), {
+    volume: '11', source: htmlPath, paragraphIndex: 8, ruleId: 'smartphone', kind: 'text', start: 2, end: 7,
+  });
+  assert.equal(events.find((event) => event.kind === 'ruby-annotation-count').count, 1);
+});
+
+test('HTML reports each explicit ruby rule count, including old zero-match rules', async (t) => {
+  const html = SAMPLE_HTML.replace('暑假在昨天告終。', '抬頭和淺村Asamura淺村Asamura');
+  const rubyAnnotations = [
+    { text: '擡头', base: '擡头', ruby: 'とう' },
+    { text: '浅村Asamura', base: '浅村', ruby: 'Asamura' },
+  ];
+  const { epub, events } = await buildHtmlFixture(t, html, { volume: '11', rubyAnnotations });
+  const chapter = epub.entries['OEBPS/Text/chapter0001.xhtml'].toString('utf8');
+  assert.match(chapter, /抬头和/);
+  assert.doesNotMatch(chapter, /擡头/);
+  assert.equal((chapter.match(/<ruby>浅村<rt>Asamura<\/rt><\/ruby>/g) || []).length, 2);
+  const counts = events.filter((event) => event.kind === 'ruby-annotation-count');
+  assert.deepEqual(counts.map(({ ruleIndex, count }) => [ruleIndex, count]), [[1, 0], [2, 2]]);
+  assert.match(counts[0].message, /检查/);
+});
+
+test('built-in HTML ruby rules render both volume 11 variants without explicit-rule events', async (t) => {
+  const html = SAMPLE_HTML.replace('暑假在昨天告終。', '社會資料科學Social Data Science與社會數據科學Social Data Science');
+  const { epub, events } = await buildHtmlFixture(t, html, { volume: '11' });
+  const chapter = epub.entries['OEBPS/Text/chapter0001.xhtml'].toString('utf8');
+  assert.equal((chapter.match(/<ruby>社会数据科学<rt>Social Data Science<\/rt><\/ruby>/g) || []).length, 2);
+  assert.equal(events.filter((event) => event.kind === 'ruby-annotation-count').length, 0);
+});
+
+test('explicitly passed built-in ruby rules do not produce manual rule counts', async (t) => {
+  const html = SAMPLE_HTML.replace('暑假在昨天告終。', '社會資料科學Social Data Science');
+  const { epub, events } = await buildHtmlFixture(t, html, {
+    volume: '11', rubyAnnotations: rubyAnnotationsForVolume('11'), rubyAnnotationSource: 'built-in',
+  });
+  assert.match(epub.entries['OEBPS/Text/chapter0001.xhtml'].toString('utf8'), /<ruby>社会数据科学<rt>Social Data Science<\/rt><\/ruby>/);
+  assert.equal(events.filter((event) => event.kind === 'ruby-annotation-count').length, 0);
+});
+
+test('HTML book title, TOC and chapters use the selected wording consistently', () => {
+  const html = SAMPLE_HTML.replace('义妹生活 11[台/繁]', '智慧型手機 11[台/繁]')
+    .replaceAll('序幕　淺村悠太', '智慧型手機淺村悠太');
+  const taiwan = parseLightNovelHtml(html, { volume: '11' });
+  const mainland = parseLightNovelHtml(html, { volume: '11', wording: 'mainland' });
+  assert.match(taiwan.title, /智慧型手机/);
+  assert.match(mainland.title, /智能手机/);
+  assert.equal(taiwan.tocTitles[0], '智慧型手机浅村悠太');
+  assert.equal(mainland.tocTitles[0], '智能手机浅村悠太');
+  assert.equal(mainland.chapters[0].title, mainland.tocTitles[0]);
+});
+
+test('HTML manual ruby protection and counts follow actual inline and fixed footnote rendering', async (t) => {
+  const html = SAMPLE_HTML
+    .replace('暑假在昨天告終。', '（註：智慧型手機Smartphone）')
+    .replace('晚安，悠太。', '前文。&lt;/div&gt;&lt;div&gt;戀愛生活小說智慧型手機&lt;/div&gt;&lt;div&gt;普通注音Y普通注音Y');
+  const rubyAnnotations = [
+    { text: '智慧型手机Smartphone', base: '智慧型手机', ruby: 'Smartphone' },
+    { text: '恋爱生活小说智慧型手机', base: '恋爱生活小说', ruby: 'Smartphone' },
+    { text: '普通注音Y', base: '普通注音', ruby: 'Y' },
+  ];
+  const { epub, events } = await buildHtmlFixture(t, html, { volume: 'another-days', wording: 'mainland', rubyAnnotations });
+  const first = epub.entries['OEBPS/Text/chapter0001.xhtml'].toString('utf8');
+  const second = epub.entries['OEBPS/Text/chapter0002.xhtml'].toString('utf8');
+  assert.match(first, /智能手机Smartphone/);
+  assert.match(second, /恋爱生活小说<sub><a\b[\s\S]*?<\/a><\/sub>智能手机/);
+  assert.equal((second.match(/<ruby>普通注音<rt>Y<\/rt><\/ruby>/g) || []).length, 2);
+  assert.deepEqual(events.filter((event) => event.kind === 'ruby-annotation-count').map(({ ruleIndex, count }) => [ruleIndex, count]), [[1, 0], [2, 0], [3, 2]]);
+});
+
+test('a new competing match cannot replace a manual ruby selected before wording conversion', async (t) => {
+  const html = SAMPLE_HTML.replace('暑假在昨天告終。', '智慧型手機ABC');
+  const rubyAnnotations = [
+    { text: 'ABC', base: 'A', ruby: 'first' },
+    { text: '智能手机ABC', base: '整体', ruby: 'second' },
+  ];
+  const { epub, events } = await buildHtmlFixture(t, html, { volume: '11', wording: 'mainland', rubyAnnotations });
+  const chapter = epub.entries['OEBPS/Text/chapter0001.xhtml'].toString('utf8');
+  assert.match(chapter, /智能手机<ruby>A<rt>first<\/rt><\/ruby>/);
+  assert.doesNotMatch(chapter, /<ruby>整体<rt>second/);
+  assert.deepEqual(events.filter((event) => event.kind === 'ruby-annotation-count').map(({ ruleIndex, count }) => [ruleIndex, count]), [[1, 1], [2, 0]]);
+});
+
+test('new non-overlapping ruby matches render alongside matches selected before conversion', async (t) => {
+  const html = SAMPLE_HTML.replace('暑假在昨天告終。', '智慧型手機和淺村Asamura');
+  const rubyAnnotations = [
+    { text: '智能手机', base: '手机', ruby: 'new' },
+    { text: '浅村Asamura', base: '浅村', ruby: 'Asamura' },
+  ];
+  const { epub, events } = await buildHtmlFixture(t, html, { volume: '11', wording: 'mainland', rubyAnnotations });
+  const chapter = epub.entries['OEBPS/Text/chapter0001.xhtml'].toString('utf8');
+  assert.match(chapter, /<ruby>手机<rt>new<\/rt><\/ruby>和<ruby>浅村<rt>Asamura<\/rt><\/ruby>/);
+  assert.deepEqual(events.filter((event) => event.kind === 'ruby-annotation-count').map(({ ruleIndex, count }) => [ruleIndex, count]), [[1, 1], [2, 1]]);
+});
+
+test('rendering under another volume selects that volume’s built-in ruby rules', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-ruby-volume-'));
+  const originalFetch = globalThis.fetch;
+  t.after(async () => { globalThis.fetch = originalFetch; await rm(dir, { recursive: true, force: true }); });
+  const ref = join(dir, 'ref.epub');
+  const out = join(dir, 'out.epub');
+  await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
+  globalThis.fetch = async () => ({ ok: true, headers: { get: () => 'image/jpeg' }, arrayBuffer: async () => new Uint8Array([1]).buffer });
+  const html = SAMPLE_HTML.replace('暑假在昨天告終。', '淺村Asamura');
+  const book = parseLightNovelHtml(html, { volume: '11', wording: 'mainland' });
+  const events = [];
+  await buildLightNovelEpubFromBook(book, {
+    volume: '13', refEpubPath: ref, outEpubPath: out, includeSpecials: false, onDiagnostic: (event) => events.push(event),
+  });
+  const epub = await readEpub(out);
+  assert.match(epub.entries['OEBPS/Text/chapter0001.xhtml'].toString('utf8'), /<ruby>浅村<rt>Asamura<\/rt><\/ruby>/);
+  assert.equal(events.filter((event) => event.kind === 'ruby-annotation-count').length, 0);
+});
+
+test('a changed volume recomputes manual matches using its actual footnote boundaries', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-ruby-volume-footnote-'));
+  const originalFetch = globalThis.fetch;
+  t.after(async () => { globalThis.fetch = originalFetch; await rm(dir, { recursive: true, force: true }); });
+  const ref = join(dir, 'ref.epub');
+  const out = join(dir, 'out.epub');
+  await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
+  globalThis.fetch = async () => ({ ok: true, headers: { get: () => 'image/jpeg' }, arrayBuffer: async () => new Uint8Array([1]).buffer });
+  const html = SAMPLE_HTML.replace('晚安，悠太。', '前文。&lt;/div&gt;&lt;div&gt;智慧型手機戀愛生活小說ABC');
+  const rubyAnnotations = [
+    { text: '恋爱生活小说ABC', base: '恋爱生活小说', ruby: 'full' },
+    { text: 'ABC', base: 'A', ruby: 'one' },
+  ];
+  const book = parseLightNovelHtml(html, { volume: '11', wording: 'mainland', rubyAnnotations });
+  const events = [];
+  await buildLightNovelEpubFromBook(book, {
+    volume: 'another-days', refEpubPath: ref, outEpubPath: out, includeSpecials: false, onDiagnostic: (event) => events.push(event),
+  });
+  const epub = await readEpub(out);
+  const chapter = epub.entries['OEBPS/Text/chapter0002.xhtml'].toString('utf8');
+  assert.match(chapter, /智能手机恋爱生活小说<sub><a\b[\s\S]*?<\/a><\/sub><ruby>A<rt>one<\/rt><\/ruby>/);
+  assert.deepEqual(events.filter((event) => event.kind === 'ruby-annotation-count').map(({ ruleIndex, count }) => [ruleIndex, count]), [[1, 0], [2, 1]]);
+});
+
+test('changing volume without changing footnotes retains original matches over new competitors', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-ruby-volume-competition-'));
+  const originalFetch = globalThis.fetch;
+  t.after(async () => { globalThis.fetch = originalFetch; await rm(dir, { recursive: true, force: true }); });
+  const ref = join(dir, 'ref.epub');
+  const out = join(dir, 'out.epub');
+  await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
+  globalThis.fetch = async () => ({ ok: true, headers: { get: () => 'image/jpeg' }, arrayBuffer: async () => new Uint8Array([1]).buffer });
+  const html = SAMPLE_HTML.replace('暑假在昨天告終。', '智慧型手機ABC');
+  const rubyAnnotations = [{ text: 'ABC', base: 'A', ruby: 'first' }, { text: '智能手机ABC', base: '整体', ruby: 'second' }];
+  const book = parseLightNovelHtml(html, { volume: '11', wording: 'mainland', rubyAnnotations });
+  await buildLightNovelEpubFromBook(book, { volume: '13', refEpubPath: ref, outEpubPath: out, includeSpecials: false });
+  const epub = await readEpub(out);
+  assert.match(epub.entries['OEBPS/Text/chapter0001.xhtml'].toString('utf8'), /智能手机<ruby>A<rt>first<\/rt><\/ruby>/);
+});
+
+test('changing footnote context that changes wording protection fails before replacing output', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-ruby-context-change-'));
+  const originalFetch = globalThis.fetch;
+  t.after(async () => { globalThis.fetch = originalFetch; await rm(dir, { recursive: true, force: true }); });
+  const ref = join(dir, 'ref.epub');
+  await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
+  globalThis.fetch = async () => ({ ok: true, headers: { get: () => 'image/jpeg' }, arrayBuffer: async () => new Uint8Array([1]).buffer });
+  const html = SAMPLE_HTML.replace('晚安，悠太。', '前文。&lt;/div&gt;&lt;div&gt;戀愛生活小說智慧型手機');
+  const rubyAnnotations = [{ text: '恋爱生活小说智慧型手机', base: '恋爱生活小说', ruby: 'Smartphone' }];
+  for (const [parsedVolume, renderedVolume] of [['11', 'another-days'], ['another-days', '11']]) {
+    const book = parseLightNovelHtml(html, { volume: parsedVolume, wording: 'mainland', rubyAnnotations });
+    const out = join(dir, `${parsedVolume}.epub`);
+    await writeFile(out, 'existing');
+    await assert.rejects(buildLightNovelEpubFromBook(book, {
+      volume: renderedVolume, refEpubPath: ref, outEpubPath: out, includeSpecials: false,
+    }), /reparse/i);
+    assert.equal(await readFile(out, 'utf8'), 'existing');
+  }
+});
+
+test('changing manual rules after parsing requires reparsing when a replacement would overlap', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-ruby-rule-change-'));
+  const originalFetch = globalThis.fetch;
+  t.after(async () => { globalThis.fetch = originalFetch; await rm(dir, { recursive: true, force: true }); });
+  const ref = join(dir, 'ref.epub');
+  const out = join(dir, 'out.epub');
+  await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
+  await writeFile(out, 'existing');
+  globalThis.fetch = async () => ({ ok: true, headers: { get: () => 'image/jpeg' }, arrayBuffer: async () => new Uint8Array([1]).buffer });
+  const html = SAMPLE_HTML.replace('暑假在昨天告終。', '智慧型手機ABC');
+  const book = parseLightNovelHtml(html, { volume: '11', wording: 'mainland', rubyAnnotations: [] });
+  await assert.rejects(buildLightNovelEpubFromBook(book, {
+    refEpubPath: ref, outEpubPath: out, includeSpecials: false,
+    rubyAnnotations: [{ text: '智慧型手机ABC', base: '智慧型手机', ruby: 'ABC' }],
+  }), /reparse/i);
+  assert.equal(await readFile(out, 'utf8'), 'existing');
+});
+
+test('editing parsed text with a saved ruby plan fails instead of changing the chosen reading', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-ruby-edited-text-'));
+  const originalFetch = globalThis.fetch;
+  t.after(async () => { globalThis.fetch = originalFetch; await rm(dir, { recursive: true, force: true }); });
+  const ref = join(dir, 'ref.epub');
+  const out = join(dir, 'out.epub');
+  await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
+  await writeFile(out, 'existing');
+  globalThis.fetch = async () => ({ ok: true, headers: { get: () => 'image/jpeg' }, arrayBuffer: async () => new Uint8Array([1]).buffer });
+  const html = SAMPLE_HTML.replace('暑假在昨天告終。', '智慧型手機ABC');
+  const rubyAnnotations = [{ text: 'ABC', base: 'A', ruby: 'first' }, { text: '智能手机ABC', base: '整体', ruby: 'second' }];
+  for (const change of ['append', 'empty', 'separator', 'image']) {
+    const book = parseLightNovelHtml(html, { volume: '11', wording: 'mainland', rubyAnnotations });
+    const block = book.chapters[0].blocks[0];
+    if (change === 'append') block.text += '。';
+    else if (change === 'empty') block.text = '';
+    else if (change === 'separator') block.text = '---';
+    else block.type = 'image';
+    await assert.rejects(buildLightNovelEpubFromBook(book, {
+      refEpubPath: ref, outEpubPath: out, includeSpecials: false,
+    }), /reparse/i);
+    assert.equal(await readFile(out, 'utf8'), 'existing');
+  }
+});
+
+test('moving a chapter invalidates its saved fixed-footnote match plan', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-ruby-moved-chapter-'));
+  const originalFetch = globalThis.fetch;
+  t.after(async () => { globalThis.fetch = originalFetch; await rm(dir, { recursive: true, force: true }); });
+  const ref = join(dir, 'ref.epub');
+  const out = join(dir, 'out.epub');
+  await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
+  globalThis.fetch = async () => ({ ok: true, headers: { get: () => 'image/jpeg' }, arrayBuffer: async () => new Uint8Array([1]).buffer });
+  const html = SAMPLE_HTML.replace('晚安，悠太。', '前文。&lt;/div&gt;&lt;div&gt;智慧型手機戀愛生活小說ABC');
+  const rubyAnnotations = [
+    { text: '恋爱生活小说ABC', base: '恋爱生活小说', ruby: 'full' },
+    { text: 'ABC', base: 'A', ruby: 'one' },
+  ];
+  const book = parseLightNovelHtml(html, { volume: 'another-days', wording: 'mainland', rubyAnnotations });
+  [book.chapters[0], book.chapters[1]] = [book.chapters[1], book.chapters[0]];
+  await buildLightNovelEpubFromBook(book, { refEpubPath: ref, outEpubPath: out, includeSpecials: false });
+  const epub = await readEpub(out);
+  const chapter = epub.entries['OEBPS/Text/chapter0001.xhtml'].toString('utf8');
+  assert.match(chapter, /智能手机<ruby>恋爱生活小说<rt>full<\/rt><\/ruby>/);
+});
+
+test('manual ruby matches survive serialization between parsing and rendering', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-ruby-serialized-'));
+  const originalFetch = globalThis.fetch;
+  t.after(async () => { globalThis.fetch = originalFetch; await rm(dir, { recursive: true, force: true }); });
+  const ref = join(dir, 'ref.epub');
+  const out = join(dir, 'out.epub');
+  await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
+  globalThis.fetch = async () => ({ ok: true, headers: { get: () => 'image/jpeg' }, arrayBuffer: async () => new Uint8Array([1]).buffer });
+  const html = SAMPLE_HTML.replace('暑假在昨天告終。', '智慧型手機ABC');
+  const rubyAnnotations = [{ text: 'ABC', base: 'A', ruby: 'first' }, { text: '智能手机ABC', base: '整体', ruby: 'second' }];
+  const book = JSON.parse(JSON.stringify(parseLightNovelHtml(html, { volume: '11', wording: 'mainland', rubyAnnotations })));
+  const events = [];
+  await buildLightNovelEpubFromBook(book, {
+    refEpubPath: ref, outEpubPath: out, includeSpecials: false, onDiagnostic: (event) => events.push(event),
+  });
+  const epub = await readEpub(out);
+  assert.match(epub.entries['OEBPS/Text/chapter0001.xhtml'].toString('utf8'), /智能手机<ruby>A<rt>first<\/rt><\/ruby>/);
+  assert.deepEqual(events.filter((event) => event.kind === 'ruby-annotation-count').map(({ ruleIndex, count }) => [ruleIndex, count]), [[1, 1], [2, 0]]);
+});
+
+test('splitLightNovelBook maps manual ruby protection after normalizing direct input whitespace', () => {
+  const parsed = parseLightNovelArticle(extractArticleHtml(SAMPLE_HTML));
+  const paragraph = parsed.blocks.find((block) => block.type === 'text' && block.text.includes('暑假在昨天告終。'));
+  paragraph.text = `${' '.repeat(20)}智慧型手機Smartphone`;
+  const events = [];
+  const book = splitLightNovelBook(parsed, {
+    volume: '11', wording: 'mainland', rubyAnnotations: [{ text: '智慧型手机Smartphone', base: '智慧型手机', ruby: 'Smartphone' }],
+    onDiagnostic: (event) => events.push(event),
+  });
+  assert.equal(book.chapters[0].blocks[0].text, '智慧型手机Smartphone');
+  assert.deepEqual(events.map(({ ruleId, start, end }) => [ruleId, start, end]), [['smartphone', 0, 5]]);
+});
+
+test('a throwing manual ruby count callback preserves the existing output', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-ruby-callback-fault-'));
+  const originalFetch = globalThis.fetch;
+  t.after(async () => { globalThis.fetch = originalFetch; await rm(dir, { recursive: true, force: true }); });
+  const htmlPath = join(dir, 'source.html');
+  const refEpubPath = join(dir, 'ref.epub');
+  const outEpubPath = join(dir, 'out.epub');
+  await writeFile(htmlPath, SAMPLE_HTML, 'utf8');
+  await writeEpub(refEpubPath, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
+  const previous = Buffer.from('existing output must survive');
+  await writeFile(outEpubPath, previous);
+  globalThis.fetch = async () => ({ ok: true, headers: { get: () => 'image/jpeg' }, arrayBuffer: async () => new Uint8Array([1]).buffer });
+  await assert.rejects(buildLightNovelEpub({
+    htmlPath, refEpubPath, outEpubPath, includeSpecials: false,
+    rubyAnnotations: [{ text: '不存在', base: '不存在', ruby: 'missing' }],
+    onDiagnostic: (event) => { if (event.kind === 'ruby-annotation-count') throw new Error('injected diagnostic failure'); },
+  }), /injected diagnostic failure/);
+  assert.equal(sha256(await readFile(outEpubPath)), sha256(previous));
+  assert.deepEqual((await readdir(dir)).sort(), ['out.epub', 'ref.epub', 'source.html']);
+});
+
+test('manual ruby counts exclude native ruby rendered inside a footnote', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-manual-native-count-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const source = join(dir, 'source.epub');
+  const ref = join(dir, 'ref.epub');
+  const out = join(dir, 'out.epub');
+  await writeHyreadFixture(source, { pages: { 'p-002.xhtml': hyreadP('正文') } });
+  await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
+  const book = await parseHyreadEpubToBook(source, { volume: '13' });
+  const note = '旁注（注：水）';
+  const pos = note.indexOf('水');
+  book.chapters[0].blocks = [
+    { type: 'text', text: '普通注音Y普通注音Y' },
+    { type: 'text', text: note, rubySpans: [{ start: pos, end: pos + 1, base: '水', rt: 'Native' }] },
+  ];
+  const events = [];
+  await buildLightNovelEpubFromBook(book, {
+    sourceImages: book._sourceImages, refEpubPath: ref, outEpubPath: out, includeSpecials: false,
+    rubyAnnotations: [{ text: '普通注音Y', base: '普通注音', ruby: 'Y' }, { text: '水', base: '水', ruby: 'Manual' }],
+    onDiagnostic: (event) => events.push(event),
+  });
+  const epub = await readEpub(out);
+  const chapter = epub.entries['OEBPS/Text/chapter0001.xhtml'].toString('utf8');
+  assert.equal((chapter.match(/<ruby>普通注音<rt>Y<\/rt><\/ruby>/g) || []).length, 2);
+  assert.match(chapter, /<ruby>水<rt>Native<\/rt><\/ruby>/);
+  assert.deepEqual(events.filter((event) => event.kind === 'ruby-annotation-count').map(({ ruleIndex, count }) => [ruleIndex, count]), [[1, 2], [2, 0]]);
+});
 
 test('extractArticleHtml decodes escaped article and preserves image query ampersands', () => {
   const articleHtml = extractArticleHtml(SAMPLE_HTML);

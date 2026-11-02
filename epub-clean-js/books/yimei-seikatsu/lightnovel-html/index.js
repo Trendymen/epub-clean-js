@@ -10,7 +10,7 @@ import { buildSteraFootnote, normalizeFootnoteIds, selfCloseVoidTags } from '../
 import { validateOutput } from '../../../src/core/validator.js';
 import { MESSAGE_DISCLAIMER_LINES } from '../migrate/extras-cleaner.js';
 import { anotherDaysFixedFootnotesForChapter } from '../another-days-footnotes.js';
-import { simplifyText } from '../chinese-conversion.js';
+import { applyWordingRules, simplifyBase, simplifyText, validateWording } from '../chinese-conversion.js';
 
 export { simplifyText } from '../chinese-conversion.js';
 
@@ -46,6 +46,9 @@ const DEFAULT_RUBY_ANNOTATIONS_BY_VOLUME = {
     { text: '水星我们学校', base: '水星', ruby: '我们学校' },
   ],
 };
+function rubyAnnotationSignature(annotations) {
+  return JSON.stringify(annotations.map((rule) => [rule?.text, rule?.base, rule?.ruby]));
+}
 
 function decodeHtmlEntities(input) {
   return String(input)
@@ -83,8 +86,8 @@ function normalizeImageSrc(src) {
   return decodeHtmlEntities(src).replaceAll('&amp;', '&');
 }
 
-function normalizeBookTitle(title, volume = '11') {
-  const simplified = simplifyText(title || `义妹生活 ${volume}`);
+function normalizeBookTitle(title, volume = '11', wording = 'taiwan') {
+  const simplified = simplifyText(title || `义妹生活 ${volume}`, { wording });
   if (/\[台\/繁\]/.test(simplified)) return simplified.replace('[台/繁]', '[台简]');
   if (/\[台繁\]/.test(simplified)) return simplified.replace('[台繁]', '[台简]');
   if (/\[台简\]/.test(simplified)) return simplified;
@@ -302,11 +305,13 @@ function renderNativeParagraphWithNotes(text, spans, state, fixedFootnotes) {
 
 // 把单个段落文本里的台版内联注释与固定迁移注释替换成 duokan-footnote 引用锚点，
 // 注释正文累积到 state.asides，编号由 state.counter 递增（每章重置）。
-function renderParagraphWithNotes(text, state, fixedFootnotes = [], rubySpans = null) {
+function renderParagraphWithNotes(text, state, fixedFootnotes = [], rubySpans = null, plannedMatches = null) {
   if (state && rubySpans) return renderNativeParagraphWithNotes(text, rubySpans, state, fixedFootnotes);
   const renderText = (start, end, plain = false) => {
     if (!rubySpans) return plain ? text.slice(start, end)
-      : renderRubyAnnotations(text.slice(start, end), state?.rubyAnnotations || []);
+      : plannedMatches !== null
+        ? renderPlannedRuby(text, start, end, plannedMatches, state?.rubyAnnotations || [], state?.onRubyMatch)
+        : renderRubyAnnotations(text.slice(start, end), state?.rubyAnnotations || [], state?.onRubyMatch);
     return renderNativeRuby(text, start, end, rubySpans, { plain });
   };
   if (!state) return renderText(0, text.length);
@@ -327,13 +332,12 @@ function renderParagraphWithNotes(text, state, fixedFootnotes = [], rubySpans = 
   return html;
 }
 
-function renderRubyAnnotations(text, annotations = []) {
+function findRubyAnnotations(text, annotations = []) {
   const rules = annotations
-    .filter((rule) => rule?.text && rule?.base && rule?.ruby)
-    .map((rule) => ({ ...rule, text: String(rule.text), base: String(rule.base), ruby: String(rule.ruby) }));
-  if (rules.length === 0) return escapeXml(text);
-
-  let html = '';
+    .map((rule, index) => ({ rule, index }))
+    .filter(({ rule }) => rule?.text && rule?.base && rule?.ruby)
+    .map(({ rule, index }) => ({ ...rule, index, text: String(rule.text), base: String(rule.base), ruby: String(rule.ruby) }));
+  const matches = [];
   let cursor = 0;
   while (cursor < text.length) {
     let next = null;
@@ -342,21 +346,79 @@ function renderRubyAnnotations(text, annotations = []) {
       if (index < 0) continue;
       if (!next || index < next.index) next = { index, rule };
     }
-    if (!next) {
-      html += escapeXml(text.slice(cursor));
-      break;
-    }
-    html += escapeXml(text.slice(cursor, next.index));
-    html += `<ruby>${escapeXml(next.rule.base)}<rt>${escapeXml(next.rule.ruby)}</rt></ruby>`;
+    if (!next) break;
+    matches.push({ start: next.index, end: next.index + next.rule.text.length, rule: next.rule });
     cursor = next.index + next.rule.text.length;
   }
-  return html;
+  return matches;
+}
+
+function renderRubyAnnotations(text, annotations = [], onMatch) {
+  let html = '';
+  let cursor = 0;
+  for (const match of findRubyAnnotations(text, annotations)) {
+    html += escapeXml(text.slice(cursor, match.start));
+    html += `<ruby>${escapeXml(match.rule.base)}<rt>${escapeXml(match.rule.ruby)}</rt></ruby>`;
+    onMatch?.(match.rule.index);
+    cursor = match.end;
+  }
+  return html + escapeXml(text.slice(cursor));
+}
+
+function renderPlannedRuby(text, start, end, matches, annotations, onMatch) {
+  let html = '';
+  let cursor = start;
+  for (const match of matches) {
+    if (match.start < start || match.end > end) continue;
+    html += renderRubyAnnotations(text.slice(cursor, match.start), annotations, onMatch);
+    html += `<ruby>${escapeXml(match.rule.base)}<rt>${escapeXml(match.rule.ruby)}</rt></ruby>`;
+    onMatch?.(match.rule.index);
+    cursor = match.end;
+  }
+  return html + renderRubyAnnotations(text.slice(cursor, end), annotations, onMatch);
+}
+
+function noteBoundarySignature(text, fixedFootnotes) {
+  return JSON.stringify(collectNoteEvents(text, fixedFootnotes).map(({ type, start, end }) => [type, start, end]));
+}
+
+function resolveRubyPlan(plan, text, annotations, fixedFootnotes, sameRules) {
+  if (sameRules && plan.noteBoundaries === noteBoundarySignature(text, fixedFootnotes)) return plan.matches;
+  const fail = () => { throw new Error(`Cannot preserve ruby after context change (${plan.source}:${plan.paragraphIndex}); reparse with the current volume and rules`); };
+  const matches = annotationRangesForParagraph(plan.sourceText, annotations, fixedFootnotes);
+  for (const candidate of [...plan.edits, ...plan.skipped]) {
+    const wasSkipped = plan.skipped.some((item) => item.start === candidate.start && item.end === candidate.end);
+    const nowSkipped = matches.some((match) => candidate.start < match.end && candidate.end > match.start);
+    if (wasSkipped !== nowSkipped) fail();
+  }
+  const mapOffset = (offset) => {
+    let delta = 0;
+    for (const edit of plan.edits) {
+      if (offset <= edit.start) break;
+      if (offset < edit.end) fail();
+      delta += edit.target.length - (edit.end - edit.start);
+    }
+    return offset + delta;
+  };
+  const sourceNotes = collectNoteEvents(plan.sourceText, fixedFootnotes)
+    .map(({ type, start, end }) => [type, mapOffset(start), mapOffset(end)]);
+  if (JSON.stringify(sourceNotes) !== noteBoundarySignature(text, fixedFootnotes)) fail();
+  return matches.map((match) => ({ ...match, start: mapOffset(match.start), end: mapOffset(match.end) }));
+}
+
+function assertRubyPlanMatchesBlock(block) {
+  const plan = block._rubyAnnotationPlan;
+  if (plan && (block.type !== 'text' || plan.text !== (block.rubySpans ? block.text : normalizeText(block.text)))) {
+    throw new Error(`Cannot preserve ruby after text change (${plan.source}:${plan.paragraphIndex}); reparse with the current text`);
+  }
+  return plan;
 }
 
 function renderBlocks(blocks, state = null) {
   const lines = [];
   let paraIdx = 0;
   for (const block of blocks) {
+    const plan = assertRubyPlanMatchesBlock(block);
     if (block.type === 'image') {
       lines.push(renderImageDiv(block));
       continue;
@@ -364,7 +426,9 @@ function renderBlocks(blocks, state = null) {
     const text = block.rubySpans ? block.text : normalizeText(block.text);
     if (!text || isSeparator(text)) continue;
     const fixedFootnotes = state?.fixedFootnotesByPara?.get(paraIdx) ?? [];
-    lines.push(` <p>${renderParagraphWithNotes(text, state, fixedFootnotes, block.rubySpans)}</p>`);
+    const matches = plan && plan.text === text && state
+      ? resolveRubyPlan(plan, text, state.rubyAnnotations, fixedFootnotes, state.sameAnnotationRules) : null;
+    lines.push(` <p>${renderParagraphWithNotes(text, state, fixedFootnotes, block.rubySpans, matches)}</p>`);
     paraIdx += 1;
   }
   return lines.join('\n');
@@ -380,7 +444,7 @@ function groupFixedFootnotesByPara(fixedFootnotes = []) {
   return grouped;
 }
 
-function renderChapterXhtml(chapter, { rubyAnnotations = [], fixedFootnotes = [] } = {}) {
+function renderChapterXhtml(chapter, { rubyAnnotations = [], fixedFootnotes = [], onRubyMatch, sameAnnotationRules = false } = {}) {
   const title = chapter.heading ? { title: chapter.heading.text, titleRubySpans: chapter.heading.rubySpans } : chapter;
   const [mainTitle, subtitle] = splitHeading(title.title);
   // 合并为单行 h3（匹配 healed 日翻版风格），有副标题时用全角空格连接
@@ -399,6 +463,8 @@ function renderChapterXhtml(chapter, { rubyAnnotations = [], fixedFootnotes = []
     counter: 1,
     asides: [],
     rubyAnnotations,
+    sameAnnotationRules,
+    onRubyMatch,
     fixedFootnotesByPara: groupFixedFootnotesByPara(fixedFootnotes),
   };
   const body = renderBlocks(chapter.blocks, state);
@@ -1377,14 +1443,41 @@ export function parseLightNovelArticle(articleHtml) {
   };
 }
 
-export function splitLightNovelBook(parsed, { volume = '11' } = {}) {
+function annotationRangesForParagraph(text, annotations, fixedFootnotes) {
+  const ranges = [];
+  let cursor = 0;
+  const addMatches = (start, end) => {
+    for (const match of findRubyAnnotations(text.slice(start, end), annotations)) {
+      ranges.push({ start: start + match.start, end: start + match.end, rule: match.rule });
+    }
+  };
+  for (const event of collectNoteEvents(text, fixedFootnotes)) {
+    if (event.start < cursor) continue;
+    addMatches(cursor, event.start);
+    cursor = event.end;
+  }
+  addMatches(cursor, text.length);
+  return ranges;
+}
+
+export function splitLightNovelBook(parsed, options = {}) {
+  const {
+    volume = '11', wording = 'taiwan', rubyAnnotations = DEFAULT_RUBY_ANNOTATIONS_BY_VOLUME[Number(volume)] || [],
+    rubyAnnotationSource = options.rubyAnnotations === undefined ? 'built-in' : 'explicit',
+    sourcePath = '<inline>', onDiagnostic,
+  } = options;
+  validateWording(wording);
+  const sourceIndices = new Map();
+  let textIndex = 0;
   const simplifiedBlocks = parsed.blocks.map((block) => {
     if (block.type !== 'text') return { ...block };
-    return { ...block, text: simplifyText(block.text) };
+    const result = { ...block, text: simplifyBase(block.rubySpans ? block.text : normalizeText(block.text)) };
+    sourceIndices.set(result, ++textIndex);
+    return result;
   });
 
   const originalTitle = parsed.title || simplifiedBlocks.find((block) => block.type === 'text')?.text || '';
-  const title = normalizeBookTitle(originalTitle, volume);
+  const title = normalizeBookTitle(originalTitle, volume, wording);
   const contentsIndex = simplifiedBlocks.findIndex((block) => block.type === 'text' && isContentsTitle(block.text));
   if (contentsIndex < 0) throw new Error('No CONTENTS block found');
 
@@ -1458,7 +1551,7 @@ export function splitLightNovelBook(parsed, { volume = '11' } = {}) {
   if (current) chapters.push(current);
   const backImages = extractTrailingImages(chapters);
 
-  return {
+  const book = {
     title,
     volume,
     author: '三河ごーすと',
@@ -1471,7 +1564,45 @@ export function splitLightNovelBook(parsed, { volume = '11' } = {}) {
     summaryBlocks,
     tocTitles,
     chapters,
+    _rubyAnnotationConfig: {
+      rules: rubyAnnotations.map((rule) => rule ? { ...rule } : rule), source: rubyAnnotationSource, volume,
+    },
   };
+
+  const protectedRanges = new Map();
+  for (const plan of planChapterRendering(book).plans) {
+    const notes = groupFixedFootnotesByPara(anotherDaysFixedFootnotesForChapter(volume, plan.id.replace(/\.xhtml$/, '')));
+    let paraIndex = 0;
+    for (const block of plan.bodyBlocks) {
+      if (block.type === 'image') continue;
+      const text = block.rubySpans ? block.text : normalizeText(block.text);
+      if (!text || isSeparator(text)) continue;
+      if (!block.rubySpans) {
+        const fixedFootnotes = notes.get(paraIndex) || [];
+        protectedRanges.set(block, { matches: annotationRangesForParagraph(text, rubyAnnotations, fixedFootnotes), fixedFootnotes });
+      }
+      paraIndex += 1;
+    }
+  }
+  for (const block of simplifiedBlocks) {
+    if (block.type !== 'text') continue;
+    const original = block.text;
+    const protection = protectedRanges.get(block);
+    const result = applyWordingRules(block.text, { wording, ranges: protection?.matches || [], includeEdits: Boolean(protection) });
+    for (const skipped of result.skipped) onDiagnostic?.({
+      volume, source: sourcePath, paragraphIndex: sourceIndices.get(block),
+      ruleId: skipped.ruleId, kind: 'text', start: skipped.start, end: skipped.end,
+    });
+    block.text = result.text;
+    if (protection && (result.edits.length || result.skipped.length)) block._rubyAnnotationPlan = {
+      sourceText: original, text: result.text, edits: result.edits, skipped: result.skipped,
+      matches: result.ranges, noteBoundaries: noteBoundarySignature(result.text, protection.fixedFootnotes),
+      source: sourcePath, paragraphIndex: sourceIndices.get(block),
+    };
+  }
+  book.tocTitles = tocTitles.map((text) => applyWordingRules(text, { wording }).text);
+  for (const chapter of chapters) chapter.title = applyWordingRules(chapter.title, { wording }).text;
+  return book;
 }
 
 export function parseLightNovelHtml(html, opts = {}) {
@@ -1520,9 +1651,20 @@ export async function buildLightNovelEpubFromBook(book, {
   volume = book.volume || '11',
   includeSpecials = true,
   creditOverrides = DEFAULT_CREDIT_OVERRIDES,
-  rubyAnnotations = DEFAULT_RUBY_ANNOTATIONS_BY_VOLUME[Number(volume)] || [],
+  rubyAnnotations = null,
+  rubyAnnotationSource = null,
+  onDiagnostic,
   modifiedIso = new Date().toISOString(),
 }) {
+  for (const block of [...book.preBlocks, ...book.chapters.flatMap((chapter) => chapter.blocks)]) assertRubyPlanMatchesBlock(block);
+  const config = book._rubyAnnotationConfig;
+  const sameVolume = config && String(config.volume) === String(volume);
+  const inherited = config && (config.source !== 'built-in' || sameVolume) ? config : null;
+  const annotations = rubyAnnotations ?? inherited?.rules ?? DEFAULT_RUBY_ANNOTATIONS_BY_VOLUME[Number(volume)] ?? [];
+  const annotationSource = rubyAnnotationSource ?? (rubyAnnotations === null ? inherited?.source ?? 'built-in' : 'explicit');
+  const sameAnnotationRules = Boolean(config
+    && rubyAnnotationSignature(config.rules) === rubyAnnotationSignature(annotations));
+  const rubyCounts = annotations.map(() => 0);
   const imageSourcePath = sourceImageEpubPath || imageRefEpubPath;
   const images = providedSourceImages
     ? applySourceImagesToBook(book, providedSourceImages)
@@ -1664,7 +1806,9 @@ export async function buildLightNovelEpubFromBook(book, {
         renderChapterXhtml(
           { title: plan.chapter.title, titleRubySpans: plan.chapter.titleRubySpans, heading: plan.chapter.heading, blocks: plan.bodyBlocks },
           {
-            rubyAnnotations,
+            rubyAnnotations: annotations,
+            onRubyMatch: (index) => { rubyCounts[index] += 1; },
+            sameAnnotationRules,
             fixedFootnotes: anotherDaysFixedFootnotesForChapter(volume, plan.id.replace(/\.xhtml$/, '')),
           },
         ),
@@ -1791,6 +1935,12 @@ export async function buildLightNovelEpubFromBook(book, {
     if (!validation.ok) {
       throw new Error(`EPUB 校验失败：${[...validation.issues, ...validation.brokenLinks].join('；')}`);
     }
+    if (annotationSource === 'explicit') {
+      rubyCounts.forEach((count, index) => onDiagnostic?.({
+        kind: 'ruby-annotation-count', ruleIndex: index + 1, count,
+        ...(count === 0 ? { message: '未命中，请检查手工注音匹配文本' } : {}),
+      }));
+    }
     await fs.promises.rename(stagingPath, outEpubPath);
   } finally {
     await fs.promises.rm(stagingDir, { recursive: true, force: true });
@@ -1807,14 +1957,22 @@ export async function buildLightNovelEpub({
   imageRefProfile = null,
   outEpubPath,
   volume = '11',
+  wording = 'taiwan',
+  sourcePath = htmlPath,
+  onDiagnostic,
   includeSpecials = true,
   creditOverrides = DEFAULT_CREDIT_OVERRIDES,
-  rubyAnnotations = DEFAULT_RUBY_ANNOTATIONS_BY_VOLUME[Number(volume)] || [],
+  rubyAnnotations = null,
+  rubyAnnotationSource = rubyAnnotations === null ? 'built-in' : 'explicit',
   modifiedIso = new Date().toISOString(),
 }) {
+  validateWording(wording);
+  const annotations = rubyAnnotations ?? DEFAULT_RUBY_ANNOTATIONS_BY_VOLUME[Number(volume)] ?? [];
   const fs = await import('node:fs/promises');
   const html = await fs.readFile(htmlPath, 'utf8');
-  const book = parseLightNovelHtml(html, { volume });
+  const book = parseLightNovelHtml(html, {
+    volume, wording, rubyAnnotations: annotations, rubyAnnotationSource, sourcePath, onDiagnostic,
+  });
   return buildLightNovelEpubFromBook(book, {
     sourceImageEpubPath,
     imageRefEpubPath,
@@ -1825,7 +1983,9 @@ export async function buildLightNovelEpub({
     volume,
     includeSpecials,
     creditOverrides,
-    rubyAnnotations,
+    rubyAnnotations: annotations,
+    rubyAnnotationSource,
+    onDiagnostic,
     modifiedIso,
   });
 }

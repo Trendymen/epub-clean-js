@@ -59,6 +59,16 @@ test('词组与注音相交时保留文本并返回基线区间', () => {
   assert.deepEqual(result.skipped, [{ ruleId: 'smartphone', start: 0, end: 5 }]);
 });
 
+test('可选记录词表替换以便核对后续上下文变更', () => {
+  const result = applyWordingRules('智慧型手机和网路上', {
+    wording: 'mainland', ranges: [{ start: 6, end: 9 }], includeEdits: true,
+  });
+  assert.equal(result.text, '智能手机和网路上');
+  assert.deepEqual(result.edits, [{ start: 0, end: 5, target: '智能手机', ruleId: 'smartphone' }]);
+  assert.deepEqual(result.skipped, [{ ruleId: 'network-on', start: 6, end: 9, target: '网络上' }]);
+  assert.deepEqual(applyWordingRules('智慧型手机', { includeEdits: true }).edits, []);
+});
+
 const context = { volume: '13', source: 'item/xhtml/p-002.xhtml', paragraphIndex: 1 };
 
 function expectMappingError(action, reason) {

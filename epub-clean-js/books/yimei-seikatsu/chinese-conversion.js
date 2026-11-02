@@ -18,9 +18,11 @@ export function simplifyBase(input) {
   return converter(String(input)).replace(/∼/g, '～');
 }
 
-export function applyWordingRules(text, { wording = 'taiwan', ranges = [] } = {}) {
+export function applyWordingRules(text, { wording = 'taiwan', ranges = [], includeEdits = false } = {}) {
   validateWording(wording);
-  if (wording === 'taiwan') return { text, ranges: ranges.map((range) => ({ ...range })), skipped: [] };
+  if (wording === 'taiwan') return {
+    text, ranges: ranges.map((range) => ({ ...range })), skipped: [], ...(includeEdits ? { edits: [] } : {}),
+  };
 
   const skipped = [];
   const edits = [];
@@ -32,9 +34,9 @@ export function applyWordingRules(text, { wording = 'taiwan', ranges = [] } = {}
     }
     const end = offset + rule.source.length;
     if (ranges.some((range) => offset < range.end && end > range.start)) {
-      skipped.push({ ruleId: rule.id, start: offset, end });
+      skipped.push({ ruleId: rule.id, start: offset, end, ...(includeEdits ? { target: rule.target } : {}) });
     } else {
-      edits.push({ start: offset, end, target: rule.target });
+      edits.push({ start: offset, end, target: rule.target, ...(includeEdits ? { ruleId: rule.id } : {}) });
     }
     offset = end;
   }
@@ -53,6 +55,7 @@ export function applyWordingRules(text, { wording = 'taiwan', ranges = [] } = {}
     text: result,
     ranges: ranges.map((range) => ({ ...range, start: mapOffset(range.start), end: mapOffset(range.end) })),
     skipped,
+    ...(includeEdits ? { edits } : {}),
   };
 }
 
