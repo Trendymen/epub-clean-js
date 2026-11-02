@@ -221,22 +221,93 @@ function collectNoteEvents(text, fixedFootnotes = []) {
     .sort((a, b) => (a.start - b.start) || (a.end - b.end) || (a.order - b.order));
 }
 
+function renderNativeRuby(text, start, end, spans, { plain = false, renderPlain } = {}) {
+  const renderPart = renderPlain || ((from, to) => plain ? text.slice(from, to) : escapeXml(text.slice(from, to)));
+  let html = '';
+  let cursor = start;
+  for (const span of spans) {
+    if (span.start < start || span.end > end) continue;
+    html += renderPart(cursor, span.start);
+    const base = renderNativeRuby(text, span.start, span.end, span.children || [], { plain, renderPlain });
+    const reading = renderNativeRuby(span.rt, 0, span.rt.length, span.rtSpans || [], { plain });
+    html += plain ? `${base}（${reading}）` : `<ruby>${base}<rt>${reading}</rt></ruby>`;
+    cursor = span.end;
+  }
+  return html + renderPart(cursor, end);
+}
+
+function renderNativeParagraphWithNotes(text, spans, state, fixedFootnotes) {
+  const events = [];
+  let cursor = 0;
+  for (const event of collectNoteEvents(text, fixedFootnotes)) {
+    if (event.start < cursor) continue;
+    events.push(event);
+    cursor = event.end;
+  }
+  if (events.length === 0) return renderNativeRuby(text, 0, text.length, spans);
+  const inside = (items, start, end) => items.flatMap((span) => {
+    if (span.start >= start && span.end <= end) return [span];
+    if (span.start <= start && span.end >= end) return inside(span.children || [], start, end);
+    if (span.start < end && span.end > start) throw new Error('Cannot preserve ruby across a footnote boundary');
+    return [];
+  });
+  const references = [];
+  const edits = events.map((event, index) => {
+    const noteSpans = event.type === 'inline' ? inside(spans, event.bodyStart, event.bodyEnd) : [];
+    const body = noteSpans.length
+      ? normalizeText(renderNativeRuby(text, event.bodyStart, event.bodyEnd, noteSpans, { plain: true })) : event.body;
+    const renderedBody = noteSpans.length ? renderNativeRuby(text, event.bodyStart, event.bodyEnd, noteSpans) : null;
+    references.push(buildRenderedFootnote(body, state, renderedBody));
+    return { ...event, marker: `\u0000${index}\u0000` };
+  });
+  let edited = '';
+  cursor = 0;
+  for (const edit of edits) {
+    edited += text.slice(cursor, edit.start) + edit.marker;
+    cursor = edit.end;
+  }
+  edited += text.slice(cursor);
+
+  const mapSpan = (span) => {
+    let before = 0;
+    let within = 0;
+    for (const edit of edits) {
+      const delta = edit.marker.length - (edit.end - edit.start);
+      if (edit.end <= span.start) before += delta;
+      else if (edit.start >= span.end) continue;
+      else if (edit.start >= span.start && edit.end <= span.end) within += delta;
+      else if (edit.start <= span.start && edit.end >= span.end) {
+        if (edit.type === 'inline' && span.start >= edit.bodyStart && span.end <= edit.bodyEnd) return null;
+        throw new Error('Cannot preserve ruby across a footnote boundary');
+      }
+      else throw new Error('Cannot preserve ruby across a footnote boundary');
+    }
+    const start = span.start + before;
+    const end = span.end + before + within;
+    return { ...span, start, end, base: edited.slice(start, end),
+      ...(span.children ? { children: span.children.map(mapSpan).filter(Boolean) } : {}) };
+  };
+  const renderPlain = (start, end) => {
+    const part = edited.slice(start, end);
+    let result = '';
+    let last = 0;
+    for (const match of part.matchAll(/\u0000(\d+)\u0000/g)) {
+      result += escapeXml(part.slice(last, match.index)) + references[Number(match[1])];
+      last = match.index + match[0].length;
+    }
+    return result + escapeXml(part.slice(last));
+  };
+  return renderNativeRuby(edited, 0, edited.length, spans.map(mapSpan).filter(Boolean), { renderPlain });
+}
+
 // 把单个段落文本里的台版内联注释与固定迁移注释替换成 duokan-footnote 引用锚点，
 // 注释正文累积到 state.asides，编号由 state.counter 递增（每章重置）。
 function renderParagraphWithNotes(text, state, fixedFootnotes = [], rubySpans = null) {
+  if (state && rubySpans) return renderNativeParagraphWithNotes(text, rubySpans, state, fixedFootnotes);
   const renderText = (start, end, plain = false) => {
     if (!rubySpans) return plain ? text.slice(start, end)
       : renderRubyAnnotations(text.slice(start, end), state?.rubyAnnotations || []);
-    let html = '';
-    let cursor = start;
-    for (const span of rubySpans) {
-      if (span.start < start || span.end > end) continue;
-      html += plain ? text.slice(cursor, span.start) : escapeXml(text.slice(cursor, span.start));
-      html += plain ? `${span.base}（${span.rt}）`
-        : `<ruby>${escapeXml(span.base)}<rt>${escapeXml(span.rt)}</rt></ruby>`;
-      cursor = span.end;
-    }
-    return html + (plain ? text.slice(cursor, end) : escapeXml(text.slice(cursor, end)));
+    return renderNativeRuby(text, start, end, rubySpans, { plain });
   };
   if (!state) return renderText(0, text.length);
   let html = '';
@@ -310,10 +381,19 @@ function groupFixedFootnotesByPara(fixedFootnotes = []) {
 }
 
 function renderChapterXhtml(chapter, { rubyAnnotations = [], fixedFootnotes = [] } = {}) {
-  const [mainTitle, subtitle] = splitHeading(chapter.title);
+  const title = chapter.heading ? { title: chapter.heading.text, titleRubySpans: chapter.heading.rubySpans } : chapter;
+  const [mainTitle, subtitle] = splitHeading(title.title);
   // 合并为单行 h3（匹配 healed 日翻版风格），有副标题时用全角空格连接
   const merged = subtitle ? `${mainTitle}　${subtitle}` : mainTitle;
-  const heading = merged ? ` <h3>${escapeXml(merged)}</h3>` : '';
+  const insertAt = merged !== title.title && merged === `${mainTitle}　${title.title.slice(mainTitle.length)}`
+    ? mainTitle.length : null;
+  const shift = (spans) => spans.map((span) => {
+    const start = span.start + (insertAt !== null && span.start >= insertAt ? 1 : 0);
+    const end = span.end + (insertAt !== null && span.end > insertAt ? 1 : 0);
+    return { ...span, start, end, base: merged.slice(start, end), ...(span.children ? { children: shift(span.children) } : {}) };
+  });
+  const heading = merged ? ` <h3>${title.titleRubySpans?.length
+    ? renderTitleRuby({ title: merged, titleRubySpans: shift(title.titleRubySpans) }) : escapeXml(merged)}</h3>` : '';
 
   const state = {
     counter: 1,
@@ -324,6 +404,12 @@ function renderChapterXhtml(chapter, { rubyAnnotations = [], fixedFootnotes = []
   const body = renderBlocks(chapter.blocks, state);
   const footnotes = state.asides.length > 0 ? `\n${state.asides.join('')}` : '';
   return xhtml(chapter.title, [heading, body].filter(Boolean).join('\n') + footnotes);
+}
+
+function renderTitleRuby(entry) {
+  return entry.titleRubySpans?.length
+    ? renderParagraphWithNotes(entry.title, null, [], entry.titleRubySpans)
+    : escapeXml(entry.title);
 }
 
 function renderCoverXhtml(coverImage) {
@@ -410,25 +496,53 @@ function renderPreXhtml(book) {
 
 function flattenTocEntries(entries) {
   return entries.flatMap((entry) => [
-    { title: entry.title, href: entry.href },
+    { title: entry.title, titleRubySpans: entry.titleRubySpans, href: entry.href },
     ...flattenTocEntries(entry.children || []),
   ]);
 }
 
-function renderAnotherDaysTocTitle(title) {
+function renderAnotherDaysTocTitle(title, rubySpans = []) {
   const normalized = normalizeTitle(title);
+  const renderStyled = (start, end, styles = [], inserts = []) => {
+    const renderPlain = (from, to) => {
+      if (from === to) return '';
+      const boundaries = [...new Set([from, to, ...styles.flatMap((style) => [style.start, style.end]),
+        ...inserts.map((insert) => insert.offset)].filter((offset) => offset >= from && offset <= to))].sort((a, b) => a - b);
+      return boundaries.slice(0, -1).map((offset, index) => {
+        const inserted = inserts.filter((item) => item.offset === offset).map((item) => item.html).join('');
+        const value = escapeXml(normalized.slice(offset, boundaries[index + 1]));
+        const style = styles.find((item) => item.start <= offset && item.end >= boundaries[index + 1]);
+        return inserted + (style ? `<span class="${style.className}">${value}</span>` : value);
+      }).join('');
+    };
+    return renderNativeRuby(normalized, start, end, rubySpans, { renderPlain });
+  };
   const anime = normalized.match(/^动画义妹生活第(.+?)集随笔（三河ごーすと感想）$/);
   if (anime) {
+    if (rubySpans.length) {
+      const split = normalized.indexOf('（三河ごーすと感想）');
+      const styles = [{ start: 0, end: 2, className: 'dbox' }, { start: 3, end: 4, className: 'c1' }];
+      const inserts = [{ offset: 2, html: '<span class="em05"> </span>' }];
+      if (rubySpans.some((span) => span.start < split && span.end > split)) {
+        return `<p>${renderStyled(0, normalized.length,
+          [...styles, { start: split, end: normalized.length, className: 'ctit' }],
+          [...inserts, { offset: split, html: '<span class="ctit-spacer"></span>' }])}</p>`;
+      }
+      return `<p>${renderStyled(0, split, styles, inserts)}</p>
+  <p class="ctit"><span class="ctit-spacer"></span>${renderStyled(split, normalized.length)}</p>`;
+    }
     return `<p><span class="dbox">动画</span><span class="em05"> </span>义<span class="c1">妹</span>生活第${escapeXml(anime[1])}集随笔</p>
   <p class="ctit"><span class="ctit-spacer"></span>（三河ごーすと感想）</p>`;
   }
 
   const sideStory = normalized.match(/^外传小说《(.+?)》(.+)$/);
   if (sideStory) {
+    if (rubySpans.length) return `<p>${renderStyled(0, normalized.length,
+      [{ start: 0, end: 4, className: 'ebox' }], [{ offset: 4, html: '<span class="em05"> </span>' }])}</p>`;
     return `<p><span class="ebox">外传小说</span><span class="em05"> </span>《${escapeXml(sideStory[1])}》${escapeXml(sideStory[2])}</p>`;
   }
 
-  return `<p class="em095">${escapeXml(normalized)}</p>`;
+  return `<p class="em095">${rubySpans.length ? renderStyled(0, normalized.length) : escapeXml(normalized)}</p>`;
 }
 
 function setCssDeclaration(declarations, name, value, { after } = {}) {
@@ -469,7 +583,7 @@ function renderAnotherDaysTocXhtml(tocEntries, styleRef) {
   const rows = flattenTocEntries(tocEntries)
     .map((entry) => ` <div class="toc">
   <a href="${escapeXml(path.posix.basename(entry.href))}">
-  ${renderAnotherDaysTocTitle(entry.title)}
+  ${renderAnotherDaysTocTitle(entry.title, entry.titleRubySpans)}
   </a>
  </div>`)
     .join('\n');
@@ -507,7 +621,7 @@ function renderTocXhtml(tocEntries, { styleRef = null, volume = null } = {}) {
   const rows = flattenTocEntries(tocEntries)
     .map((entry) => ` <div class="toc">
   <a href="${escapeXml(path.posix.basename(entry.href))}">
-  <p>${escapeXml(entry.title)}</p>
+  <p>${renderTitleRuby(entry)}</p>
   </a>
  </div>`)
     .join('\n');
@@ -529,7 +643,7 @@ function renderTocXhtml(tocEntries, { styleRef = null, volume = null } = {}) {
 
 function renderNavXhtml(entries, { hasSummary = false, bodyHref = 'pre.xhtml' } = {}) {
   const renderEntry = (entry, indent = '      ') => {
-    const link = `${indent}<li><a href="${escapeXml(path.posix.basename(entry.href))}">${escapeXml(entry.title)}</a>`;
+    const link = `${indent}<li><a href="${escapeXml(path.posix.basename(entry.href))}">${renderTitleRuby(entry)}</a>`;
     if (!entry.children?.length) return `${link}</li>`;
     const children = entry.children.map((child) => renderEntry(child, `${indent}  `)).join('\n');
     return `${link}\n${indent}  <ol>\n${children}\n${indent}  </ol>\n${indent}</li>`;
@@ -1503,7 +1617,7 @@ export async function buildLightNovelEpubFromBook(book, {
   const chapterRendering = planChapterRendering(book);
   const chapterEntries = chapterRendering.plans.flatMap((plan) => {
     if (plan.chapter.includeInToc === false || !plan.navHref) return [];
-    return [{ title: plan.chapter.title, href: plan.navHref }];
+    return [{ title: plan.chapter.title, titleRubySpans: plan.chapter.titleRubySpans, href: plan.navHref }];
   });
   const specialGroup = specials.tocEntries.length > 0
     ? {
@@ -1548,7 +1662,7 @@ export async function buildLightNovelEpubFromBook(book, {
         plan.id,
         plan.href,
         renderChapterXhtml(
-          { title: plan.chapter.title, blocks: plan.bodyBlocks },
+          { title: plan.chapter.title, titleRubySpans: plan.chapter.titleRubySpans, heading: plan.chapter.heading, blocks: plan.bodyBlocks },
           {
             rubyAnnotations,
             fixedFootnotes: anotherDaysFixedFootnotesForChapter(volume, plan.id.replace(/\.xhtml$/, '')),

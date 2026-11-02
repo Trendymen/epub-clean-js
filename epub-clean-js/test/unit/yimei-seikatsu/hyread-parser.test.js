@@ -6,12 +6,12 @@ import { tmpdir } from 'node:os';
 import { parseHyreadEpubToBook, parseAnotherDaysEpubToBook } from '../../../books/yimei-seikatsu/hyread-parser.js';
 import { writeHyreadFixture, bodyParagraph as p } from '../../helpers/hyread-fixture.js';
 
-async function withFixture(options, check, parser = parseHyreadEpubToBook) {
+async function withFixture(options, check, parser = parseHyreadEpubToBook, parserOptions = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'hyread-parser-'));
   try {
     const source = join(dir, 'source.epub');
     await writeHyreadFixture(source, options);
-    await check(await parser(source, { volume: '13' }));
+    await check(await parser(source, { volume: '13', ...parserOptions }));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -102,4 +102,350 @@ test('another-days retains mfont large-text decoration after the chapter heading
     assert.equal(book.chapters[0].title, '第一章');
     assert.deepEqual(book.chapters[0].blocks.map((block) => block.text), ['正文', '告别', '后文']);
   }, parseAnotherDaysEpubToBook);
+});
+
+test('HyRead maps ruby around optional length-changing wording', async () => {
+  await withFixture({ pages: { 'p-002.xhtml':
+    p('智慧型手機和<ruby>淺村<rt>Asamura</rt></ruby>')
+    + p('<ruby>淺村<rt>Asamura</rt></ruby>智慧型手機')
+    + p('智慧型手機')
+    + p('<ruby><rb>淺</rb><rt>qian</rt><rb>村</rb><rt>cun</rt></ruby>智慧型手機'),
+  } }, (book) => {
+    const [before, after, plain, paired] = book.chapters[0].blocks;
+    assert.equal(before.text, '智能手机和浅村');
+    assert.deepEqual(before.rubySpans, [{ start: 5, end: 7, base: '浅村', rt: 'Asamura' }]);
+    assert.equal(after.text, '浅村智能手机');
+    assert.deepEqual(after.rubySpans, [{ start: 0, end: 2, base: '浅村', rt: 'Asamura' }]);
+    assert.equal(plain.text, '智能手机');
+    assert.deepEqual(plain.rubySpans, []);
+    assert.equal(paired.text, '浅村智能手机');
+    assert.deepEqual(paired.rubySpans, [
+      { start: 0, end: 1, base: '浅', rt: 'qian' },
+      { start: 1, end: 2, base: '村', rt: 'cun' },
+    ]);
+  }, parseHyreadEpubToBook, { wording: 'mainland' });
+});
+
+test('HyRead reports each wording match that overlaps ruby after skipped paragraphs', async () => {
+  const diagnostics = [];
+  await withFixture({ pages: { 'p-002.xhtml':
+    '<p id="mokuji-skip">略</p>'
+    + '<p class="__reader-paragraph-spacing__"><span class="gfont40">第一章</span></p>'
+    + p('<ruby>智慧型<rt>智能</rt></ruby>手機和<ruby>智慧型<rt>智能</rt></ruby>手機'),
+  } }, (book) => {
+    const block = book.chapters[0].blocks[0];
+    assert.equal(block.text, '智慧型手机和智慧型手机');
+    assert.deepEqual(block.rubySpans, [
+      { start: 0, end: 3, base: '智慧型', rt: '智能' },
+      { start: 6, end: 9, base: '智慧型', rt: '智能' },
+    ]);
+    assert.deepEqual(diagnostics, [
+      { volume: '13', source: 'item/xhtml/p-002.xhtml', paragraphIndex: 3, ruleId: 'smartphone', kind: 'text', start: 0, end: 5 },
+      { volume: '13', source: 'item/xhtml/p-002.xhtml', paragraphIndex: 3, ruleId: 'smartphone', kind: 'text', start: 6, end: 11 },
+    ]);
+  }, parseHyreadEpubToBook, { wording: 'mainland', onDiagnostic: (event) => diagnostics.push(event) });
+});
+
+test('HyRead keeps reading wording and reports its ruby and rt positions', async () => {
+  const diagnostics = [];
+  await withFixture({ pages: { 'p-002.xhtml':
+    p('<ruby><rt>unused</rt></ruby><ruby><rb>水</rb><rt>water</rt><rb>星</rb><rt>智慧型手機</rt></ruby>'),
+  } }, (book) => {
+    const block = book.chapters[0].blocks[0];
+    assert.equal(block.text, '水星');
+    assert.deepEqual(block.rubySpans, [
+      { start: 0, end: 1, base: '水', rt: 'water' },
+      { start: 1, end: 2, base: '星', rt: '智慧型手机' },
+    ]);
+    assert.deepEqual(diagnostics, [{
+      volume: '13', source: 'item/xhtml/p-002.xhtml', paragraphIndex: 1,
+      ruleId: 'smartphone', kind: 'rt', rubyIndex: 2, rtIndex: 2, start: 0, end: 5,
+    }]);
+  }, parseHyreadEpubToBook, { wording: 'mainland', onDiagnostic: (event) => diagnostics.push(event) });
+});
+
+test('both HyRead parsers convert TOC and body with the selected wording', async () => {
+  for (const parser of [parseHyreadEpubToBook, parseAnotherDaysEpubToBook]) {
+    await withFixture({ pages: { 'p-002.xhtml': p('智慧型手機') }, toc: [['p-002.xhtml', '網路上']] }, (book) => {
+      assert.equal(book.tocTitles[0], '网络上');
+      assert.equal(book.chapters[0].title, '网络上');
+      assert.equal(book.chapters[0].blocks[0].text, '智能手机');
+    }, parser, { wording: 'mainland' });
+  }
+});
+
+test('HyRead rejects invalid wording before opening the source', async () => {
+  for (const parser of [parseHyreadEpubToBook, parseAnotherDaysEpubToBook]) {
+    await assert.rejects(parser('/missing/source.epub', { volume: '13', wording: 'invalid' }), /wording/i);
+  }
+});
+
+test('unpaired ruby bases remain protected from optional wording', async () => {
+  const diagnostics = [];
+  await withFixture({ pages: { 'p-002.xhtml':
+    p('<ruby><rb>水</rb><rt>water</rt><rb>智慧型</rb></ruby>手機'),
+  } }, (book) => {
+    const block = book.chapters[0].blocks[0];
+    assert.equal(block.text, '水智慧型手机');
+    assert.deepEqual(block.rubySpans, [{ start: 0, end: 1, base: '水', rt: 'water' }]);
+    assert.deepEqual(diagnostics, [{
+      volume: '13', source: 'item/xhtml/p-002.xhtml', paragraphIndex: 1,
+      ruleId: 'smartphone', kind: 'text', start: 1, end: 6,
+    }]);
+  }, parseHyreadEpubToBook, { wording: 'mainland', onDiagnostic: (event) => diagnostics.push(event) });
+});
+
+test('nested ruby preserves both readings and reports the inner ruby in document order', async () => {
+  for (const markup of [
+    '<ruby>甲<ruby>智慧型<rt>智慧型手機</rt></ruby>手機<rt>outer</rt></ruby>',
+    '<ruby><rb>甲<ruby>智慧型<rt>智慧型手機</rt></ruby>手機</rb><rt>outer</rt></ruby>',
+  ]) {
+    const diagnostics = [];
+    await withFixture({ pages: { 'p-002.xhtml': p(markup) } }, (book) => {
+      const block = book.chapters[0].blocks[0];
+      assert.equal(block.text, '甲智慧型手机');
+      assert.deepEqual(block.rubySpans, [{
+        start: 0, end: 6, base: '甲智慧型手机', rt: 'outer', children: [
+          { start: 1, end: 4, base: '智慧型', rt: '智慧型手机' },
+        ],
+      }]);
+      assert.deepEqual(diagnostics, [
+        { volume: '13', source: 'item/xhtml/p-002.xhtml', paragraphIndex: 1, ruleId: 'smartphone', kind: 'rt', rubyIndex: 2, rtIndex: 1, start: 0, end: 5 },
+        { volume: '13', source: 'item/xhtml/p-002.xhtml', paragraphIndex: 1, ruleId: 'smartphone', kind: 'text', start: 1, end: 6 },
+      ]);
+    }, parseHyreadEpubToBook, { wording: 'mainland', onDiagnostic: (event) => diagnostics.push(event) });
+  }
+});
+
+test('nested ruby maps supplementary characters after a preceding length-changing replacement', async () => {
+  await withFixture({ pages: { 'p-002.xhtml':
+    p('智慧型手機<ruby>二<ruby>噁<rt>惡</rt></ruby>英<rt>dioxin</rt></ruby>'),
+  } }, (book) => {
+    const block = book.chapters[0].blocks[0];
+    assert.equal(block.text, '智能手机二𫫇英');
+    assert.deepEqual(block.rubySpans, [{
+      start: 4, end: 8, base: '二𫫇英', rt: 'dioxin', children: [
+        { start: 5, end: 7, base: '𫫇', rt: '恶' },
+      ],
+    }]);
+  }, parseHyreadEpubToBook, { wording: 'mainland' });
+});
+
+test('nested reading diagnostics count all rt descendants in document order', async () => {
+  const diagnostics = [];
+  await withFixture({ pages: { 'p-002.xhtml':
+    p('<ruby>甲<ruby>乙<rt>智慧型手機</rt></ruby><rt>智慧型手機</rt></ruby>'),
+  } }, () => {
+    assert.deepEqual(diagnostics.map(({ rubyIndex, rtIndex }) => [rubyIndex, rtIndex]), [[2, 1], [1, 2]]);
+  }, parseHyreadEpubToBook, { wording: 'mainland', onDiagnostic: (event) => diagnostics.push(event) });
+});
+
+test('nested ruby inside a reading retains structure and identifies the inner reading', async () => {
+  const diagnostics = [];
+  await withFixture({ pages: { 'p-002.xhtml':
+    p('<ruby>甲<rt><ruby>乙<rt>智慧型手機</rt></ruby></rt></ruby>'),
+  } }, (book) => {
+    assert.deepEqual(book.chapters[0].blocks[0].rubySpans, [{
+      start: 0, end: 1, base: '甲', rt: '乙', rtSpans: [
+        { start: 0, end: 1, base: '乙', rt: '智慧型手机' },
+      ],
+    }]);
+    assert.deepEqual(diagnostics, [{
+      volume: '13', source: 'item/xhtml/p-002.xhtml', paragraphIndex: 1,
+      ruleId: 'smartphone', kind: 'rt', rubyIndex: 2, rtIndex: 1, start: 0, end: 5,
+    }]);
+  }, parseHyreadEpubToBook, { wording: 'mainland', onDiagnostic: (event) => diagnostics.push(event) });
+});
+
+test('ruby formatting whitespace does not enter text or prevent protection', async () => {
+  const diagnostics = [];
+  await withFixture({ pages: { 'p-002.xhtml':
+    p('前<ruby>\n  <rb>淺</rb>\n  <rt>qian</rt>\n  <rb>村</rb>\n  <rt>cun</rt>\n</ruby>後')
+    + p('<ruby>\n<rb>智慧型</rb>\n<rt>Smart</rt>\n</ruby>手機'),
+  } }, (book) => {
+    assert.equal(book.chapters[0].blocks[0].text, '前浅村后');
+    assert.equal(book.chapters[0].blocks[1].text, '智慧型手机');
+    assert.deepEqual(diagnostics, [{
+      volume: '13', source: 'item/xhtml/p-002.xhtml', paragraphIndex: 2,
+      ruleId: 'smartphone', kind: 'text', start: 0, end: 5,
+    }]);
+  }, parseHyreadEpubToBook, { wording: 'mainland', onDiagnostic: (event) => diagnostics.push(event) });
+});
+
+test('both parsers protect and report native ruby in standalone headings', async () => {
+  for (const parser of [parseHyreadEpubToBook, parseAnotherDaysEpubToBook]) {
+    const diagnostics = [];
+    await withFixture({ pages: { 'p-002.xhtml':
+      '<p id="mokuji-skip">略</p>'
+      + '<p class="__reader-paragraph-spacing__"><span class="gfont40"><ruby>智慧型<rt>智慧型手機</rt></ruby>手機</span></p>'
+      + p('正文'),
+    }, toc: [] }, (book) => {
+      const chapter = book.chapters[0];
+      assert.equal(chapter.title, '智慧型手机');
+      assert.deepEqual(chapter.titleRubySpans, [{ start: 0, end: 3, base: '智慧型', rt: '智慧型手机' }]);
+      assert.deepEqual(diagnostics, [
+        { volume: '13', source: 'item/xhtml/p-002.xhtml', paragraphIndex: 2, ruleId: 'smartphone', kind: 'rt', rubyIndex: 1, rtIndex: 1, start: 0, end: 5 },
+        { volume: '13', source: 'item/xhtml/p-002.xhtml', paragraphIndex: 2, ruleId: 'smartphone', kind: 'text', start: 0, end: 5 },
+      ]);
+    }, parser, { wording: 'mainland', onDiagnostic: (event) => diagnostics.push(event) });
+  }
+});
+
+test('standalone heading diagnostics use uncompressed paragraph UTF-16 coordinates', async () => {
+  for (const parser of [parseHyreadEpubToBook, parseAnotherDaysEpubToBook]) {
+    const diagnostics = [];
+    await withFixture({ pages: { 'p-002.xhtml':
+      '<p><span class="gfont40">𫫇 <ruby>智慧型<rt>Smart</rt></ruby> 手機</span></p>' + p('正文'),
+    }, toc: [] }, () => {
+      assert.deepEqual(diagnostics, [{
+        volume: '13', source: 'item/xhtml/p-002.xhtml', paragraphIndex: 1,
+        ruleId: 'smartphone', kind: 'text', start: 3, end: 9,
+      }]);
+    }, parser, { wording: 'mainland', onDiagnostic: (event) => diagnostics.push(event) });
+  }
+});
+
+test('both parsers protect and report native ruby in TOC titles', async () => {
+  for (const parser of [parseHyreadEpubToBook, parseAnotherDaysEpubToBook]) {
+    const diagnostics = [];
+    await withFixture({ pages: { 'p-002.xhtml': p('正文') }, toc: [
+      ['p-002.xhtml', '<ruby>智慧型<rt>智慧型手機</rt></ruby>手機'],
+    ] }, (book) => {
+      assert.equal(book.tocTitles[0], '智慧型手机');
+      assert.equal(book.chapters[0].title, '智慧型手机');
+      assert.deepEqual(book.chapters[0].titleRubySpans, [{ start: 0, end: 3, base: '智慧型', rt: '智慧型手机' }]);
+      assert.deepEqual(diagnostics, [
+        { volume: '13', source: 'item/xhtml/p-toc-001.xhtml', paragraphIndex: null, tocEntryIndex: 1, ruleId: 'smartphone', kind: 'rt', rubyIndex: 1, rtIndex: 1, start: 0, end: 5 },
+        { volume: '13', source: 'item/xhtml/p-toc-001.xhtml', paragraphIndex: null, tocEntryIndex: 1, ruleId: 'smartphone', kind: 'text', start: 0, end: 5 },
+      ]);
+    }, parser, { wording: 'mainland', onDiagnostic: (event) => diagnostics.push(event) });
+  }
+});
+
+test('TOC ruby readings retain spaces while the title is compacted', async () => {
+  await withFixture({ pages: { 'p-002.xhtml': p('正文') }, toc: [
+    ['p-002.xhtml', '<ruby>淺村<rt>Mr Asamura</rt></ruby> 悠太'],
+  ] }, (book) => {
+    assert.equal(book.chapters[0].title, '浅村悠太');
+    assert.equal(book.chapters[0].titleRubySpans[0].rt, 'Mr Asamura');
+  });
+});
+
+test('another-days reports paragraph and reading positions through its public parser', async () => {
+  const diagnostics = [];
+  await withFixture({ pages: { 'p-002.xhtml':
+    '<p id="mokuji-skip">略</p>' + p('<ruby>智慧型<rt>智慧型手機</rt></ruby>手機'),
+  } }, () => {
+    assert.deepEqual(diagnostics, [
+      { volume: '13', source: 'item/xhtml/p-002.xhtml', paragraphIndex: 2, ruleId: 'smartphone', kind: 'rt', rubyIndex: 1, rtIndex: 1, start: 0, end: 5 },
+      { volume: '13', source: 'item/xhtml/p-002.xhtml', paragraphIndex: 2, ruleId: 'smartphone', kind: 'text', start: 0, end: 5 },
+    ]);
+  }, parseAnotherDaysEpubToBook, { wording: 'mainland', onDiagnostic: (event) => diagnostics.push(event) });
+});
+
+test('TOC diagnostics use whole-paragraph UTF-16 positions for multiple links', async () => {
+  for (const parser of [parseHyreadEpubToBook, parseAnotherDaysEpubToBook]) {
+    const diagnostics = [];
+    await withFixture({ pages: { 'p-002.xhtml': p('正文'), 'p-003.xhtml': p('正文') }, tocBody:
+      '<div class="main"><p>𫫇二噁英甲<a href="p-002.xhtml"><ruby>智慧型<rt>A</rt></ruby>手機</a>与<a href="p-003.xhtml"><ruby>智慧型<rt>B</rt></ruby>手機</a></p></div>',
+    }, () => {
+      assert.deepEqual(diagnostics, [
+        { volume: '13', source: 'item/xhtml/p-toc-001.xhtml', paragraphIndex: 1, ruleId: 'smartphone', kind: 'text', start: 7, end: 12 },
+        { volume: '13', source: 'item/xhtml/p-toc-001.xhtml', paragraphIndex: 1, ruleId: 'smartphone', kind: 'text', start: 13, end: 18 },
+      ]);
+    }, parser, { wording: 'mainland', onDiagnostic: (event) => diagnostics.push(event) });
+  }
+});
+
+test('TOC diagnostics include whitespace-compacted links and ruby surrounding a link', async () => {
+  for (const parser of [parseHyreadEpubToBook, parseAnotherDaysEpubToBook]) {
+    const diagnostics = [];
+    await withFixture({ pages: { 'p-002.xhtml': p('正文'), 'p-003.xhtml': p('正文') }, tocBody:
+      '<div class="main"><p>𫫇二噁英甲<a href="p-002.xhtml"><ruby>智慧型<rt>Smart</rt></ruby> 手機</a>与<ruby><a href="p-003.xhtml">智慧型手機</a><rt>outer</rt></ruby></p></div>',
+    }, (book) => {
+      assert.equal(book.chapters[0].title, '智慧型手机');
+      assert.equal(book.chapters[1].title, '智慧型手机');
+      assert.equal(book.chapters[1].titleRubySpans[0].rt, 'outer');
+      assert.deepEqual(diagnostics, [
+        { volume: '13', source: 'item/xhtml/p-toc-001.xhtml', paragraphIndex: 1, ruleId: 'smartphone', kind: 'text', start: 7, end: 13 },
+        { volume: '13', source: 'item/xhtml/p-toc-001.xhtml', paragraphIndex: 1, ruleId: 'smartphone', kind: 'text', start: 14, end: 19 },
+      ]);
+    }, parser, { wording: 'mainland', onDiagnostic: (event) => diagnostics.push(event) });
+  }
+});
+
+test('TOC diagnostics follow individual link matches rather than cross-link phrases', async () => {
+  for (const parser of [parseHyreadEpubToBook, parseAnotherDaysEpubToBook]) {
+    for (const first of ['<a href="p-002.xhtml">智慧型</a>', '智慧型']) {
+      const diagnostics = [];
+      await withFixture({ pages: { 'p-002.xhtml': p('正文'), 'p-003.xhtml': p('正文') }, tocBody:
+        `<div class="main"><p>${first}<a href="p-003.xhtml"><ruby>手機<rt>Smart</rt></ruby>螢幕</a></p></div>`,
+      }, () => {
+        assert.deepEqual(diagnostics, [{
+          volume: '13', source: 'item/xhtml/p-toc-001.xhtml', paragraphIndex: 1,
+          ruleId: 'phone-screen', kind: 'text', start: 3, end: 7,
+        }]);
+      }, parser, { wording: 'mainland', onDiagnostic: (event) => diagnostics.push(event) });
+    }
+    const diagnostics = [];
+    await withFixture({ pages: { 'p-002.xhtml': p('正文'), 'p-003.xhtml': p('正文') }, tocBody:
+      '<div class="main"><p><a href="p-002.xhtml"><ruby>智慧型<rt>Smart</rt></ruby></a><a href="p-003.xhtml">手機</a></p></div>',
+    }, () => assert.deepEqual(diagnostics, []), parser, {
+      wording: 'mainland', onDiagnostic: (event) => diagnostics.push(event),
+    });
+  }
+});
+
+test('TOC diagnostics do not require mapping unrelated ruby outside the link', async () => {
+  for (const parser of [parseHyreadEpubToBook, parseAnotherDaysEpubToBook]) {
+    const fixture = { pages: { 'p-002.xhtml': p('正文') }, tocBody:
+      '<div class="main"><p>傢<ruby>俱<rt>x</rt></ruby> <a href="p-002.xhtml"><ruby>智慧型<rt>Smart</rt></ruby> 手機</a></p></div>',
+    };
+    let titleWithoutCallback;
+    await withFixture(fixture, (book) => { titleWithoutCallback = book.chapters[0].title; }, parser, { wording: 'mainland' });
+    const diagnostics = [];
+    await withFixture(fixture, (book) => {
+      assert.equal(book.chapters[0].title, titleWithoutCallback);
+      assert.equal(titleWithoutCallback, '智慧型手机');
+      assert.deepEqual(diagnostics, [{
+        volume: '13', source: 'item/xhtml/p-toc-001.xhtml', paragraphIndex: 1,
+        ruleId: 'smartphone', kind: 'text', start: 3, end: 9,
+      }]);
+    }, parser, { wording: 'mainland', onDiagnostic: (event) => diagnostics.push(event) });
+  }
+});
+
+test('both parsers retain a chapter heading with ruby alongside a separate TOC title', async () => {
+  for (const parser of [parseHyreadEpubToBook, parseAnotherDaysEpubToBook]) {
+    for (const tocTitle of ['智慧型手機', '不同的目錄標題']) {
+      await withFixture({ pages: { 'p-002.xhtml':
+        '<p><span class="gfont40"><ruby>智慧型<rt>Smart</rt></ruby>手機</span></p>' + p('正文'),
+      }, toc: [['p-002.xhtml', tocTitle]] }, (book) => {
+        assert.equal(book.chapters[0].heading.text, '智慧型手机');
+        assert.deepEqual(book.chapters[0].heading.rubySpans, [{ start: 0, end: 3, base: '智慧型', rt: 'Smart' }]);
+        assert.equal(book.chapters[0].title, tocTitle === '智慧型手機' ? '智能手机' : '不同的目录标题');
+      }, parser, { wording: 'mainland' });
+    }
+  }
+});
+
+test('another-days keeps TOC afterword suffixes and ruby instead of applying heading fallback', async () => {
+  for (const tocTitle of ['後記：補充', '<ruby>後記<rt>智慧型手機</rt></ruby>：補充']) {
+    await withFixture({ pages: { 'p-002.xhtml': p('正文') }, toc: [['p-002.xhtml', tocTitle]] }, (book) => {
+      const chapter = book.chapters[0];
+      assert.equal(chapter.title, '后记：补充');
+      if (tocTitle.includes('<ruby>')) assert.equal(chapter.titleRubySpans[0].rt, '智慧型手机');
+    }, parseAnotherDaysEpubToBook, { wording: 'mainland' });
+  }
+});
+
+test('afterword fallback retains a source heading with ruby and its suffix', async () => {
+  for (const parser of [parseHyreadEpubToBook, parseAnotherDaysEpubToBook]) {
+    await withFixture({ pages: { 'p-002.xhtml':
+      '<p><span class="gfont40"><ruby>後記<rt>あとがき</rt></ruby>：補充</span></p>' + p('正文'),
+    }, toc: [] }, (book) => {
+      assert.equal(book.chapters[0].title, '后记：补充');
+      assert.equal(book.chapters[0].titleRubySpans[0].rt, 'あとがき');
+    }, parser);
+  }
 });

@@ -113,6 +113,205 @@ test('HyRead renders native ruby in chapters, preface and afterword without anno
   }
 });
 
+test('HyRead renders optional wording while retaining native ruby positions', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-hyread-wording-'));
+  try {
+    const source = join(dir, 'source.epub');
+    const ref = join(dir, 'ref.epub');
+    const out = join(dir, 'out.epub');
+    const diagnostics = [];
+    await writeHyreadFixture(source, { pages: { 'p-002.xhtml':
+      hyreadP('智慧型手機和<ruby>淺村<rt>Asamura</rt></ruby>')
+      + hyreadP('<ruby>智慧型<rt>Smart</rt></ruby>手機'),
+    } });
+    await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
+    const book = await parseHyreadEpubToBook(source, {
+      volume: '13', wording: 'mainland', onDiagnostic: (event) => diagnostics.push(event),
+    });
+    await buildLightNovelEpubFromBook(book, { sourceImages: book._sourceImages, refEpubPath: ref, outEpubPath: out, includeSpecials: false });
+    const epub = await readEpub(out);
+    const chapter = epub.entries['OEBPS/Text/chapter0001.xhtml'].toString('utf8');
+    assert.match(chapter, /智能手机和<ruby>浅村<rt>Asamura<\/rt><\/ruby>/);
+    assert.match(chapter, /<ruby>智慧型<rt>Smart<\/rt><\/ruby>手机/);
+    assert.deepEqual(diagnostics, [{
+      volume: '13', source: 'item/xhtml/p-002.xhtml', paragraphIndex: 2,
+      ruleId: 'smartphone', kind: 'text', start: 0, end: 5,
+    }]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('HyRead retains native ruby in chapter and TOC titles in the rendered EPUB', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-hyread-title-ruby-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const ref = join(dir, 'ref.epub');
+  await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
+  for (const titleInToc of [true, false]) {
+    const source = join(dir, `source-${titleInToc}.epub`);
+    const out = join(dir, `out-${titleInToc}.epub`);
+    const ruby = '<ruby>智慧型<rt>智慧型手機</rt></ruby>手機';
+    await writeHyreadFixture(source, {
+      pages: { 'p-002.xhtml': `${titleInToc ? '' : `<p><span class="gfont40">${ruby}</span></p>`}${hyreadP('正文')}` },
+      toc: titleInToc ? [['p-002.xhtml', ruby]] : [],
+    });
+    const book = await parseHyreadEpubToBook(source, { volume: '13', wording: 'mainland' });
+    await buildLightNovelEpubFromBook(book, { sourceImages: book._sourceImages, refEpubPath: ref, outEpubPath: out, includeSpecials: false });
+    const epub = await readEpub(out);
+    const expected = /<ruby>智慧型<rt>智慧型手机<\/rt><\/ruby>手机/;
+    assert.match(epub.entries['OEBPS/Text/chapter0001.xhtml'].toString('utf8'), expected);
+    assert.match(epub.entries['OEBPS/Text/TOC.xhtml'].toString('utf8'), expected);
+    assert.match(epub.entries['OEBPS/Text/navigation-documents.xhtml'].toString('utf8'), expected);
+  }
+});
+
+test('HyRead renders nested ruby and keeps a chapter heading distinct from its TOC title', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-hyread-nested-ruby-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const source = join(dir, 'source.epub');
+  const ref = join(dir, 'ref.epub');
+  const out = join(dir, 'out.epub');
+  await writeHyreadFixture(source, {
+    pages: { 'p-002.xhtml': '<p><span class="gfont40"><ruby>智慧型<rt>Smart</rt></ruby>手機</span></p>'
+      + hyreadP('<ruby>甲<ruby>智慧型<rt>智慧型手機</rt></ruby>手機<rt>outer</rt></ruby>') },
+    toc: [['p-002.xhtml', '智慧型手機']],
+  });
+  await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
+  const book = await parseHyreadEpubToBook(source, { volume: '13', wording: 'mainland' });
+  await buildLightNovelEpubFromBook(book, { sourceImages: book._sourceImages, refEpubPath: ref, outEpubPath: out, includeSpecials: false });
+  const epub = await readEpub(out);
+  const chapter = epub.entries['OEBPS/Text/chapter0001.xhtml'].toString('utf8');
+  assert.match(chapter, /<h3><ruby>智慧型<rt>Smart<\/rt><\/ruby>手机<\/h3>/);
+  assert.match(chapter, /<ruby>甲<ruby>智慧型<rt>智慧型手机<\/rt><\/ruby>手机<rt>outer<\/rt><\/ruby>/);
+  assert.match(epub.entries['OEBPS/Text/TOC.xhtml'].toString('utf8'), /智能手机/);
+});
+
+test('native nested ruby and inline footnotes retain each other in both directions', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-hyread-nested-notes-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const source = join(dir, 'source.epub');
+  const ref = join(dir, 'ref.epub');
+  const out = join(dir, 'out.epub');
+  await writeHyreadFixture(source, { pages: { 'p-002.xhtml':
+    hyreadP('<ruby>甲<ruby>乙（註：解說）丙<rt>inner</rt></ruby>丁<rt>outer</rt></ruby>')
+    + hyreadP('前（註：<ruby>甲<ruby>乙<rt>inner</rt></ruby><rt>outer</rt></ruby>解說）後'),
+  } });
+  await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
+  const book = await parseHyreadEpubToBook(source, { volume: '13' });
+  await buildLightNovelEpubFromBook(book, { sourceImages: book._sourceImages, refEpubPath: ref, outEpubPath: out, includeSpecials: false });
+  const epub = await readEpub(out);
+  const chapter = epub.entries['OEBPS/Text/chapter0001.xhtml'].toString('utf8');
+  assert.match(chapter, /<ruby>甲<ruby>乙<sub><a\b[\s\S]*?<\/a><\/sub>丙<rt>inner<\/rt><\/ruby>丁<rt>outer<\/rt><\/ruby>/);
+  assert.match(chapter, /<ruby>甲<ruby>乙<rt>inner<\/rt><\/ruby><rt>outer<\/rt><\/ruby>解说/);
+});
+
+test('fixed footnotes inside native ruby do not remove the reading', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-hyread-fixed-ruby-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const source = join(dir, 'source.epub');
+  const ref = join(dir, 'ref.epub');
+  const out = join(dir, 'out.epub');
+  await writeHyreadFixture(source, {
+    pages: { 'p-002.xhtml': hyreadP('第一章正文'), 'p-003.xhtml': hyreadP('前文') + hyreadP('<ruby>甲戀愛生活小說乙<rt>reading</rt></ruby>') },
+    toc: [['p-002.xhtml', '第一章'], ['p-003.xhtml', '第二章']],
+  });
+  await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
+  const book = await parseAnotherDaysEpubToBook(source, { volume: 'another-days' });
+  await buildLightNovelEpubFromBook(book, { sourceImages: book._sourceImages, refEpubPath: ref, outEpubPath: out, volume: 'another-days', includeSpecials: false });
+  const epub = await readEpub(out);
+  const chapter = epub.entries['OEBPS/Text/chapter0002.xhtml'].toString('utf8');
+  assert.match(chapter, /<ruby>甲恋爱生活小说<sub><a\b[\s\S]*?<\/a><\/sub>乙<rt>reading<\/rt><\/ruby>/);
+});
+
+test('reading-nested ruby and ruby enclosing a whole note are retained in the EPUB', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-hyread-reading-ruby-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const source = join(dir, 'source.epub');
+  const ref = join(dir, 'ref.epub');
+  const out = join(dir, 'out.epub');
+  await writeHyreadFixture(source, { pages: { 'p-002.xhtml':
+    hyreadP('<ruby>甲<rt><ruby>乙<rt>智慧型手機</rt></ruby></rt></ruby>')
+    + hyreadP('<ruby>（註：解說）<rt>reading</rt></ruby>'),
+  } });
+  await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
+  const book = await parseHyreadEpubToBook(source, { volume: '13', wording: 'mainland' });
+  await buildLightNovelEpubFromBook(book, { sourceImages: book._sourceImages, refEpubPath: ref, outEpubPath: out, includeSpecials: false });
+  const epub = await readEpub(out);
+  const chapter = epub.entries['OEBPS/Text/chapter0001.xhtml'].toString('utf8');
+  assert.match(chapter, /<ruby>甲<rt><ruby>乙<rt>智慧型手机<\/rt><\/ruby><\/rt><\/ruby>/);
+  assert.match(chapter, /<ruby><sub><a\b[\s\S]*?<\/a><\/sub><rt>reading<\/rt><\/ruby>/);
+});
+
+test('a TOC link surrounded by ruby retains its reading in the EPUB', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-hyread-toc-outer-ruby-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const source = join(dir, 'source.epub');
+  const ref = join(dir, 'ref.epub');
+  const out = join(dir, 'out.epub');
+  await writeHyreadFixture(source, {
+    pages: { 'p-002.xhtml': hyreadP('正文') },
+    tocBody: '<div class="main"><p><ruby><a href="p-002.xhtml">智慧型手機</a><rt>Smart</rt></ruby></p></div>',
+  });
+  await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
+  const book = await parseHyreadEpubToBook(source, { volume: '13', wording: 'mainland' });
+  await buildLightNovelEpubFromBook(book, { sourceImages: book._sourceImages, refEpubPath: ref, outEpubPath: out, includeSpecials: false });
+  const epub = await readEpub(out);
+  for (const name of ['chapter0001.xhtml', 'TOC.xhtml', 'navigation-documents.xhtml']) {
+    assert.match(epub.entries[`OEBPS/Text/${name}`].toString('utf8'), /<ruby>智慧型手机<rt>Smart<\/rt><\/ruby>/);
+  }
+});
+
+test('a ruby covering only footnote syntax fails instead of silently dropping its reading', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-hyread-note-marker-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const source = join(dir, 'source.epub');
+  const ref = join(dir, 'ref.epub');
+  await writeHyreadFixture(source, { pages: { 'p-002.xhtml':
+    hyreadP('<ruby>（註<rt>marker</rt></ruby>：解說）'),
+  } });
+  await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
+  const book = await parseHyreadEpubToBook(source, { volume: '13' });
+  await assert.rejects(buildLightNovelEpubFromBook(book, {
+    sourceImages: book._sourceImages, refEpubPath: ref, outEpubPath: join(dir, 'out.epub'), includeSpecials: false,
+  }), /ruby.*footnote/i);
+});
+
+test('title ruby keeps chapter heading separation and another-days styled TOC layout', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-hyread-title-style-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const ref = join(dir, 'ref.epub');
+  const style = join(dir, 'style.epub');
+  await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
+  await writeEpub(style, { 'OEBPS/Text/TOC.xhtml': '<html><head><style>.toc { color: black; }</style></head><body><div></div></body></html>' });
+  for (const anotherDays of [false, true, 'crossing']) {
+    const source = join(dir, `source-${anotherDays}.epub`);
+    const out = join(dir, `out-${anotherDays}.epub`);
+    const title = anotherDays === 'crossing'
+      ? '動畫義妹生活第１<ruby>集隨筆（三河ごーすと感想）<rt>note</rt></ruby>'
+      : anotherDays ? '動畫義妹生活第<ruby>１<rt>one</rt></ruby>集隨筆（三河ごーすと感想）'
+        : '<ruby>智慧型<rt>Smart</rt></ruby>手機淺村悠太';
+    await writeHyreadFixture(source, { pages: { 'p-002.xhtml': hyreadP('正文') }, toc: [['p-002.xhtml', title]] });
+    const parser = anotherDays ? parseAnotherDaysEpubToBook : parseHyreadEpubToBook;
+    const volume = anotherDays ? 'another-days' : '13';
+    const book = await parser(source, { volume, wording: 'mainland' });
+    await buildLightNovelEpubFromBook(book, { sourceImages: book._sourceImages, refEpubPath: ref, styleRefEpubPath: style, outEpubPath: out, volume, includeSpecials: false });
+    const epub = await readEpub(out);
+    if (anotherDays) {
+      const toc = epub.entries['OEBPS/Text/TOC.xhtml'].toString('utf8');
+      assert.match(toc, /<span class="dbox">动画<\/span>/);
+      if (anotherDays === 'crossing') {
+        assert.match(toc, /<ruby>集随笔[\s\S]*?<span class="ctit">（三河ごーすと感想）<\/span><rt>note<\/rt><\/ruby>/);
+      } else {
+        assert.match(toc, /<ruby>１<rt>one<\/rt><\/ruby>/);
+        assert.match(toc, /<p class="ctit">/);
+      }
+    } else {
+      const chapter = epub.entries['OEBPS/Text/chapter0001.xhtml'].toString('utf8');
+      assert.match(chapter, /<h3><ruby>智慧型<rt>Smart<\/rt><\/ruby>手机　浅村悠太<\/h3>/);
+    }
+  }
+});
+
 test('HyRead renders paired ruby and ruby inside inline footnotes with escaped readings and a plain fallback', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'ln-hyread-note-ruby-'));
   try {
