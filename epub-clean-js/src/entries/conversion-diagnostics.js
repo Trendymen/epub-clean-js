@@ -1,10 +1,11 @@
 export function printConversionDiagnostic(event) {
+  const edition = event.includeSpecials === undefined ? '' : event.includeSpecials ? '（特典版）' : '（普通版）';
   if (event.kind === 'ruby-annotation-count') {
     const hint = event.count === 0 ? '；请检查匹配文本' : '';
-    console.log(`手工注音规则 ${event.ruleIndex}：${event.count} 次${hint}`);
+    console.log(`手工注音规则 ${event.ruleIndex}${edition}：${event.count} 次${hint}`);
     return;
   }
   const position = event.paragraphIndex == null ? `目录项 ${event.tocEntryIndex ?? '?'}` : `段落 ${event.paragraphIndex}`;
   const reading = event.kind === 'rt' ? `，ruby ${event.rubyIndex}，rt ${event.rtIndex}` : '';
-  console.log(`跳过 ${event.ruleId}：卷 ${event.volume}，${event.source}，${position}，区间 [${event.start}, ${event.end})${reading}`);
+  console.log(`跳过 ${event.ruleId}${edition}：卷 ${event.volume}，${event.source}，${position}，区间 [${event.start}, ${event.end})${reading}`);
 }

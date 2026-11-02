@@ -145,7 +145,6 @@ export async function runBatch({
       rubyAnnotations: rubyAnnotationsForVolume(volume),
       rubyAnnotationSource: 'built-in',
       wording,
-      onDiagnostic,
     };
 
     // 没有 HTML 时直接读取 HyRead EPUB。
@@ -156,10 +155,11 @@ export async function runBatch({
       { suffix: '[特典]', includeSpecials: true },
     ]) {
       const outEpubPath = path.join(resolvedOutDir, `${baseName}${variant.suffix}.epub`);
+      const onVariantDiagnostic = onDiagnostic && ((event) => onDiagnostic({ ...event, includeSpecials: variant.includeSpecials }));
 
       let result;
       if (isHyreadDirect) {
-        const book = await parseHyreadEpubToBook(inputs.sourceImageEpubPath, { volume, creditOverrides, wording, onDiagnostic });
+        const book = await parseHyreadEpubToBook(inputs.sourceImageEpubPath, { volume, creditOverrides, wording, onDiagnostic: onVariantDiagnostic });
         const sourceImages = book._sourceImages;
         delete book._sourceImages;
         result = await buildLightNovelEpubFromBook(book, {
@@ -167,12 +167,14 @@ export async function runBatch({
           ...common,
           outEpubPath,
           includeSpecials: variant.includeSpecials,
+          onDiagnostic: onVariantDiagnostic,
         });
       } else {
         result = await buildLightNovelEpub({
           ...common,
           outEpubPath,
           includeSpecials: variant.includeSpecials,
+          onDiagnostic: onVariantDiagnostic,
         });
       }
 

@@ -104,9 +104,21 @@ test('batch HyRead builds preserve ruby diagnostics and treat volume rules as bu
     const epub = await readEpub(join(outDir, `[三河ごーすと].义妹生活.${volume}.[台简].epub`));
     const chapter = epub.entries['OEBPS/Text/chapter0001.xhtml'].toString('utf8');
     assert.match(chapter, /<ruby>智慧型<rt>Smart<\/rt><\/ruby>手机和智能手机/);
-    assert.ok(events.some((event) => event.volume === volume && event.ruleId === 'smartphone' && event.source === 'item/xhtml/p-002.xhtml'));
+    assert.deepEqual(events.filter((event) => event.volume === volume && event.ruleId === 'smartphone').map((event) => ({
+      includeSpecials: event.includeSpecials, source: event.source, paragraphIndex: event.paragraphIndex,
+      start: event.start, end: event.end,
+    })), [false, true].map((includeSpecials) => ({
+      includeSpecials, source: 'item/xhtml/p-002.xhtml', paragraphIndex: 1, start: 0, end: 5,
+    })));
   }
   assert.equal(events.filter((event) => event.kind === 'ruby-annotation-count').length, 0);
+  const batchResult = runCli(['build-yimei-simple', '--root', f.root, '--out-dir', join(f.root, 'cli-hyread-batch'),
+    '--volumes', '11', '--skip-backup', '--wording', 'mainland']);
+  assert.equal(batchResult.status, 0, batchResult.stderr);
+  const batchSkips = batchResult.stdout.split('\n').filter((line) => line.includes('smartphone'));
+  assert.equal(batchSkips.length, 2, batchResult.stdout);
+  assert.match(batchSkips[0], /普通版/);
+  assert.match(batchSkips[1], /特典版/);
   const apiEvents = [];
   await buildHyreadToSimple({
     sourceEpubPath: f.source, refEpubPath: f.ref, outEpubPath: join(f.root, 'hyread-api-diag.epub'),
