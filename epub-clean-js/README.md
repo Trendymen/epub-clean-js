@@ -59,7 +59,7 @@ npm run build:yimei-simple -- --volumes 14 --wording mainland
 node bin/cli.js lightnovel-html-to-epub --html /path/to/11.html --ref /path/to/ref.epub --out /path/to/11.epub --wording mainland
 ```
 
-可选词组与原生 ruby 本体或实际渲染的手工注音匹配范围相交时，该次替换会跳过。命令会报告源文件、段落、规则和 UTF-16 区间；原生读音命中还会报告 ruby 和 rt 序号。批处理诊断标明普通版或特典版；回调记录的 `includeSpecials` 为 `false` 表示普通版，为 `true` 表示特典版。HTML 的每条显式 `--ruby` 规则会报告实际命中次数，零命中时提示检查匹配文本。部分匹配丢失无法仅靠总次数发现，需要对照新旧正文检查。程序接口可通过 `wording` 选择模式，并用 `onDiagnostic(event)` 接收这些记录。
+可选词组与原生 ruby 本体或实际渲染的手工注音匹配范围相交时，该次替换会跳过。命令会报告源文件、段落、规则和 UTF-16 区间；原生读音命中还会报告 ruby 和 rt 序号。程序直接传入注音结构时，若未提供源 `rubyIndex` 或 `rtIndex`，对应序号会标为未知。ruby 与内联脚注的边界无法无损保留、未配对 ruby 出现在目录或章节标题，或整段只有无本体的读音时，构建会停止；HyRead 输入会报告源文件和段落。直接传入的书名或制作信息若带注音，或者目录和章节标题无法保留注音范围，也会报错。已经按 `mainland` 转换的程序输入不能直接再次组装；已转换数据的正文、读音或注音范围被修改后，也不能直接再次转换。这两种情况都需要重新读取源文。批处理诊断标明普通版或特典版；回调记录的 `includeSpecials` 为 `false` 表示普通版，为 `true` 表示特典版。HTML 的每条显式 `--ruby` 规则会报告实际命中次数，零命中时提示检查匹配文本。部分匹配丢失无法仅靠总次数发现，需要对照新旧正文检查。程序接口可通过 `wording` 选择模式，并用 `onDiagnostic(event)` 接收这些记录。
 
 HyRead 入口按源文位置识别章节标题和原生 ruby，本体与读音都繁转简，不会把正文中相同的普通字符串自动改成 ruby。HTML 入口保留已有显式 `--ruby 'text|base|ruby'` 参数，用于为普通文本指定替换串、ruby 本体与读音；它属于文本匹配兼容模式，不能恢复源书中已经丢失的注音位置。生成时统一 OPF/NCX 的 UUID，修复导入脚注的重复 ID，并在发布输出前检查 EPUB 必需元数据、内部资源与片段链接、重复 ID、CSS 引用、manifest 资源存在性和 OPF/NCX 标识一致性；校验失败时保留已有输出。当前运行时不检查 spine 的 itemref/idref 与 manifest 的对应关系。结构检查不能替代阅读器显示验收。
 

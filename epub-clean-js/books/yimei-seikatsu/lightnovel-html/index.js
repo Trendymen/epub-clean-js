@@ -10,7 +10,7 @@ import { buildSteraFootnote, normalizeFootnoteIds, selfCloseVoidTags } from '../
 import { validateOutput } from '../../../src/core/validator.js';
 import { MESSAGE_DISCLAIMER_LINES } from '../migrate/extras-cleaner.js';
 import { anotherDaysFixedFootnotesForChapter } from '../another-days-footnotes.js';
-import { applyWordingRules, simplifyBase, simplifyText, validateWording } from '../chinese-conversion.js';
+import { applyWordingRules, BASE_CONVERSION_ID, conversionFingerprint, simplifyBase, simplifyBaseWithRuby, simplifyText, validateWording } from '../chinese-conversion.js';
 
 export { simplifyText } from '../chinese-conversion.js';
 
@@ -86,8 +86,9 @@ function normalizeImageSrc(src) {
   return decodeHtmlEntities(src).replaceAll('&amp;', '&');
 }
 
-function normalizeBookTitle(title, volume = '11', wording = 'taiwan') {
-  const simplified = simplifyText(title || `义妹生活 ${volume}`, { wording });
+function normalizeBookTitle(title, volume = '11', wording = 'taiwan', { baseConverted = false } = {}) {
+  const value = title || `义妹生活 ${volume}`;
+  const simplified = baseConverted ? applyWordingRules(value, { wording }).text : simplifyText(value, { wording });
   if (/\[台\/繁\]/.test(simplified)) return simplified.replace('[台/繁]', '[台简]');
   if (/\[台繁\]/.test(simplified)) return simplified.replace('[台繁]', '[台简]');
   if (/\[台简\]/.test(simplified)) return simplified;
@@ -239,7 +240,11 @@ function renderNativeRuby(text, start, end, spans, { plain = false, renderPlain 
   return html + renderPart(cursor, end);
 }
 
-function renderNativeParagraphWithNotes(text, spans, state, fixedFootnotes) {
+function renderNativeParagraphWithNotes(text, spans, state, fixedFootnotes, location) {
+  const fail = () => {
+    const position = [location?.volume, location?.source, location?.paragraphIndex].filter((value) => value != null).join(':');
+    throw new Error(`Cannot preserve ruby across a footnote boundary${position ? ` (${position})` : ''}`);
+  };
   const events = [];
   let cursor = 0;
   for (const event of collectNoteEvents(text, fixedFootnotes)) {
@@ -251,7 +256,7 @@ function renderNativeParagraphWithNotes(text, spans, state, fixedFootnotes) {
   const inside = (items, start, end) => items.flatMap((span) => {
     if (span.start >= start && span.end <= end) return [span];
     if (span.start <= start && span.end >= end) return inside(span.children || [], start, end);
-    if (span.start < end && span.end > start) throw new Error('Cannot preserve ruby across a footnote boundary');
+    if (span.start < end && span.end > start) fail();
     return [];
   });
   const references = [];
@@ -278,12 +283,15 @@ function renderNativeParagraphWithNotes(text, spans, state, fixedFootnotes) {
       const delta = edit.marker.length - (edit.end - edit.start);
       if (edit.end <= span.start) before += delta;
       else if (edit.start >= span.end) continue;
-      else if (edit.start >= span.start && edit.end <= span.end) within += delta;
+      else if (edit.start >= span.start && edit.end <= span.end) {
+        if (edit.type === 'inline') fail();
+        within += delta;
+      }
       else if (edit.start <= span.start && edit.end >= span.end) {
         if (edit.type === 'inline' && span.start >= edit.bodyStart && span.end <= edit.bodyEnd) return null;
-        throw new Error('Cannot preserve ruby across a footnote boundary');
+        fail();
       }
-      else throw new Error('Cannot preserve ruby across a footnote boundary');
+      else fail();
     }
     const start = span.start + before;
     const end = span.end + before + within;
@@ -305,8 +313,8 @@ function renderNativeParagraphWithNotes(text, spans, state, fixedFootnotes) {
 
 // 把单个段落文本里的台版内联注释与固定迁移注释替换成 duokan-footnote 引用锚点，
 // 注释正文累积到 state.asides，编号由 state.counter 递增（每章重置）。
-function renderParagraphWithNotes(text, state, fixedFootnotes = [], rubySpans = null, plannedMatches = null) {
-  if (state && rubySpans) return renderNativeParagraphWithNotes(text, rubySpans, state, fixedFootnotes);
+function renderParagraphWithNotes(text, state, fixedFootnotes = [], rubySpans = null, plannedMatches = null, location = null) {
+  if (state && rubySpans) return renderNativeParagraphWithNotes(text, rubySpans, state, fixedFootnotes, location);
   const renderText = (start, end, plain = false) => {
     if (!rubySpans) return plain ? text.slice(start, end)
       : plannedMatches !== null
@@ -428,7 +436,7 @@ function renderBlocks(blocks, state = null) {
     const fixedFootnotes = state?.fixedFootnotesByPara?.get(paraIdx) ?? [];
     const matches = plan && plan.text === text && state
       ? resolveRubyPlan(plan, text, state.rubyAnnotations, fixedFootnotes, state.sameAnnotationRules) : null;
-    lines.push(` <p>${renderParagraphWithNotes(text, state, fixedFootnotes, block.rubySpans, matches)}</p>`);
+    lines.push(` <p>${renderParagraphWithNotes(text, state, fixedFootnotes, block.rubySpans, matches, block._sourceLocation)}</p>`);
     paraIdx += 1;
   }
   return lines.join('\n');
@@ -552,7 +560,7 @@ function renderPreXhtml(book) {
   const text = book.preBlocks
     .filter((block) => block.type === 'text')
     .map((block) => renderParagraphWithNotes(
-      block.rubySpans ? block.text : normalizeText(block.text), state, [], block.rubySpans,
+      block.rubySpans ? block.text : normalizeText(block.text), state, [], block.rubySpans, null, block._sourceLocation,
     ))
     .filter(Boolean)
     .join('');
@@ -1460,6 +1468,121 @@ function annotationRangesForParagraph(text, annotations, fixedFootnotes) {
   return ranges;
 }
 
+function blockConversionFingerprint(block) {
+  return conversionFingerprint(block.text, block.rubySpans || [], block._rubyProtectedRanges || [], {
+    unpairedReadings: block._unpairedReadings || [], sourceReadings: block._rubySourceReadings || [],
+    sourceLocation: block._sourceLocation || null,
+  });
+}
+
+function attachNativeRubySources(spans, sources) {
+  return spans.map((span, index) => {
+    const source = sources?.[index];
+    const matches = source?.start === span.start && source?.end === span.end && source?.rt === span.rt;
+    return {
+      ...span,
+      ...(matches && !Object.hasOwn(span, 'rubyIndex') ? { rubyIndex: source.rubyIndex } : {}),
+      ...(matches && !Object.hasOwn(span, 'rtIndex') ? { rtIndex: source.rtIndex } : {}),
+      ...(span.children ? { children: attachNativeRubySources(span.children, matches ? source.children : null) } : {}),
+      ...(span.rtSpans ? { rtSpans: attachNativeRubySources(span.rtSpans, matches ? source.rtSpans : null) } : {}),
+    };
+  });
+}
+
+function mapNativeRubyTree(text, spans, convert, context, protectedRanges = []) {
+  const ranges = [];
+  const fail = () => {
+    const position = [context?.volume, context?.source, context?.paragraphIndex].filter((value) => value != null).join(':');
+    throw new Error(`Cannot map ruby positions${position ? ` (${position})` : ''}: invalid ruby tree`);
+  };
+  const collect = (items, lower, upper) => {
+    if (!Array.isArray(items)) fail();
+    let cursor = lower;
+    for (const span of items) {
+      if (!Number.isInteger(span.start) || !Number.isInteger(span.end)
+        || span.start < cursor || span.start >= span.end || span.end > upper) fail();
+      ranges.push({ start: span.start, end: span.end });
+      collect(span.children || [], span.start, span.end);
+      cursor = span.end;
+    }
+  };
+  if (typeof text !== 'string') fail();
+  collect(spans, 0, text.length);
+  const spanCount = ranges.length;
+  if (!Array.isArray(protectedRanges)) fail();
+  for (const range of protectedRanges) {
+    if (!Number.isInteger(range.start) || !Number.isInteger(range.end)
+      || range.start < 0 || range.start >= range.end || range.end > text.length) fail();
+    ranges.push({ ...range });
+  }
+  const result = convert(text, ranges);
+  let index = 0;
+  const rebuild = (items) => items.map((span) => {
+    const { start, end } = result.ranges[index++];
+    return {
+      ...span, start, end, base: result.text.slice(start, end),
+      ...(span.children ? { children: rebuild(span.children) } : {}),
+    };
+  });
+  return { ...result, spans: rebuild(spans), protectedRanges: result.ranges.slice(spanCount) };
+}
+
+function simplifyNativeRubyTree(text, spans, context, protectedRanges = [], baseConverted = false) {
+  const result = mapNativeRubyTree(text, spans, (value, ranges) => {
+    if (baseConverted) return { text: value, ranges };
+    const converted = simplifyBaseWithRuby(value, ranges, context);
+    return { text: converted.text, ranges: converted.spans };
+  }, context, protectedRanges);
+  const simplifyReading = (span) => {
+    if (typeof span.rt !== 'string') {
+      throw new Error(`Cannot map ruby reading (${context.volume}:${context.source}:${context.paragraphIndex})`);
+    }
+    const reading = simplifyNativeRubyTree(span.rt, span.rtSpans || [], context, [], baseConverted);
+    return {
+      ...span, rt: reading.text,
+      ...(span.children ? { children: span.children.map(simplifyReading) } : {}),
+      ...(span.rtSpans ? { rtSpans: reading.spans } : {}),
+    };
+  };
+  return { text: result.text, spans: result.spans.map(simplifyReading), protectedRanges: result.protectedRanges };
+}
+
+function reportNativeReadings(spans, { wording, onDiagnostic, ...context }) {
+  if (!onDiagnostic) return;
+  const visit = (items) => {
+    for (const span of items) {
+      visit(span.children || []);
+      const ranges = span.rt ? [{ start: 0, end: span.rt.length }] : [];
+      const { skipped } = applyWordingRules(span.rt, { wording, ranges });
+      for (const match of skipped) onDiagnostic({
+        ...context, ruleId: match.ruleId, kind: 'rt',
+        rubyIndex: Number.isInteger(span.rubyIndex) && span.rubyIndex > 0 ? span.rubyIndex : null,
+        rtIndex: Number.isInteger(span.rtIndex) && span.rtIndex > 0 ? span.rtIndex : null,
+        start: match.start, end: match.end,
+      });
+      visit(span.rtSpans || []);
+    }
+  };
+  visit(spans);
+}
+
+function reportUnpairedReadings(readings, { wording, onDiagnostic, ...context }) {
+  if (!onDiagnostic) return;
+  for (const reading of readings) {
+    if (reading.rubySpans) {
+      reportNativeReadings(attachNativeRubySources(reading.rubySpans, reading.sourceReadings), {
+        ...context, wording, onDiagnostic,
+      });
+    }
+    const ranges = reading.text ? [{ start: 0, end: reading.text.length }] : [];
+    const { skipped } = applyWordingRules(reading.text, { wording, ranges });
+    for (const match of skipped) onDiagnostic({
+      ...context, ruleId: match.ruleId, kind: 'rt', rubyIndex: reading.rubyIndex, rtIndex: reading.rtIndex,
+      start: match.start, end: match.end,
+    });
+  }
+}
+
 export function splitLightNovelBook(parsed, options = {}) {
   const {
     volume = '11', wording = 'taiwan', rubyAnnotations = DEFAULT_RUBY_ANNOTATIONS_BY_VOLUME[Number(volume)] || [],
@@ -1471,15 +1594,64 @@ export function splitLightNovelBook(parsed, options = {}) {
   let textIndex = 0;
   const simplifiedBlocks = parsed.blocks.map((block) => {
     if (block.type !== 'text') return { ...block };
-    const result = { ...block, text: simplifyBase(block.rubySpans ? block.text : normalizeText(block.text)) };
-    sourceIndices.set(result, ++textIndex);
+    textIndex += 1;
+    const context = { volume, source: sourcePath, paragraphIndex: textIndex, ...block._sourceLocation };
+    const prior = block._chineseConversion;
+    const position = [context.volume, context.source, context.paragraphIndex].filter((value) => value != null).join(':');
+    if (prior && (prior.base !== BASE_CONVERSION_ID || !['taiwan', 'mainland'].includes(prior.wording))) {
+      throw new Error(`Cannot reuse unknown Chinese conversion (${position})`);
+    }
+    if (prior && prior.fingerprint !== blockConversionFingerprint(block)) {
+      throw new Error(`Cannot reuse changed Chinese conversion (${position})`);
+    }
+    if (!prior && block._unpairedReadings?.length) {
+      throw new Error(`Cannot reuse unpaired ruby readings without conversion state (${position})`);
+    }
+    if (prior?.wording === 'mainland' && wording === 'taiwan') {
+      throw new Error(`Cannot restore Taiwan wording from converted text (${position})`);
+    }
+    if (prior?.wording === 'mainland') {
+      throw new Error(`Cannot reprocess mainland wording; reparse the source (${position})`);
+    }
+    const spans = block.rubySpans && block._rubySourceReadings
+      ? attachNativeRubySources(block.rubySpans, block._rubySourceReadings) : block.rubySpans;
+    const converted = spans
+      ? simplifyNativeRubyTree(block.text, spans, context, block._rubyProtectedRanges || [], Boolean(prior)) : null;
+    const result = converted
+      ? { ...block, text: converted.text, rubySpans: converted.spans, _sourceLocation: context,
+        ...(block._rubyProtectedRanges ? { _rubyProtectedRanges: converted.protectedRanges } : {}) }
+      : { ...block, text: prior ? normalizeText(block.text) : simplifyBase(normalizeText(block.text)) };
+    result._chineseConversion = { base: BASE_CONVERSION_ID, wording };
+    sourceIndices.set(result, textIndex);
     return result;
   });
 
-  const originalTitle = parsed.title || simplifiedBlocks.find((block) => block.type === 'text')?.text || '';
-  const title = normalizeBookTitle(originalTitle, volume, wording);
   const contentsIndex = simplifiedBlocks.findIndex((block) => block.type === 'text' && isContentsTitle(block.text));
   if (contentsIndex < 0) throw new Error('No CONTENTS block found');
+  const sourcePosition = (block) => {
+    const context = block._sourceLocation || { volume, source: sourcePath, paragraphIndex: sourceIndices.get(block) };
+    return [context.volume, context.source, context.paragraphIndex].filter((value) => value != null).join(':');
+  };
+  const titleText = (block) => {
+    const text = normalizeTitle(block.text);
+    if (block._rubyProtectedRanges?.some((range) => range.unpaired !== false)) {
+      throw new Error(`Cannot preserve unpaired ruby in title (${sourcePosition(block)})`);
+    }
+    if ((block.rubySpans?.length || block._rubyProtectedRanges?.length) && text !== block.text) {
+      throw new Error(`Cannot preserve ruby in normalized title (${sourcePosition(block)})`);
+    }
+    return text;
+  };
+  for (const block of simplifiedBlocks.slice(0, contentsIndex + 1)) {
+    if (block.rubySpans?.length || block._rubyProtectedRanges?.length) {
+      throw new Error(`Cannot preserve ruby in book metadata (${sourcePosition(block)})`);
+    }
+  }
+  const originalTitle = parsed.title || simplifiedBlocks.find((block) => block.type === 'text')?.text || '';
+  const firstInputText = parsed.blocks.find((block) => block.type === 'text');
+  const titleWasConverted = !parsed.title || (firstInputText?._chineseConversion?.base === BASE_CONVERSION_ID
+    && parsed.title === firstInputText.text);
+  const title = normalizeBookTitle(originalTitle, volume, wording, { baseConverted: titleWasConverted });
 
   const coverImage = simplifiedBlocks.find((block) => block.type === 'image');
   if (!coverImage) throw new Error('No cover image found');
@@ -1493,7 +1665,7 @@ export function splitLightNovelBook(parsed, options = {}) {
     .filter((block) => block.type === 'text')
     .filter((block, index) => index !== 0);
 
-  const tocTitles = [];
+  const tocRecords = [];
   let cursor = contentsIndex + 1;
   while (cursor < simplifiedBlocks.length) {
     const block = simplifiedBlocks[cursor];
@@ -1507,19 +1679,21 @@ export function splitLightNovelBook(parsed, options = {}) {
       continue;
     }
     if (!block.bold) break;
-    tocTitles.push(text);
+    tocRecords.push({ title: titleText(block), block });
     cursor += 1;
   }
 
-  const titleMap = new Map(tocTitles.map((tocTitle) => [titleKey(tocTitle), tocTitle]));
+  const titleMap = new Map(tocRecords.map((record) => [titleKey(record.title), record]));
   const summaryBlocks = [];
   const chapters = [];
+  const chapterTitleSources = new Map();
   let current = null;
   let seenFirstChapter = false;
 
-  const startChapter = (chapterTitle) => {
+  const startChapter = (record, headingBlock) => {
     if (current) chapters.push(current);
-    current = { title: chapterTitle, blocks: [] };
+    current = { title: record.title, blocks: [] };
+    chapterTitleSources.set(current, { tocBlock: record.block, headingBlock });
     seenFirstChapter = true;
   };
 
@@ -1529,15 +1703,18 @@ export function splitLightNovelBook(parsed, options = {}) {
       const text = normalizeTitle(block.text);
       const key = titleKey(text);
       if (titleMap.has(key)) {
-        startChapter(titleMap.get(key));
+        titleText(block);
+        startChapter(titleMap.get(key), block);
         continue;
       }
       if (isAfterwordTitle(text)) {
         if (!titleMap.has('后记')) {
-          titleMap.set('后记', '后记');
-          tocTitles.push('后记');
+          const record = { title: '后记', block: null };
+          titleMap.set('后记', record);
+          tocRecords.push(record);
         }
-        startChapter('后记');
+        titleText(block);
+        startChapter(titleMap.get('后记'), block);
         continue;
       }
     }
@@ -1549,6 +1726,13 @@ export function splitLightNovelBook(parsed, options = {}) {
     }
   }
   if (current) chapters.push(current);
+  const usedTocBlocks = new Set(Array.from(chapterTitleSources.values(), ({ tocBlock }) => tocBlock));
+  for (const record of tocRecords) {
+    if (record.block && !usedTocBlocks.has(record.block)
+      && (record.block.rubySpans?.length || record.block._rubyProtectedRanges?.length)) {
+      throw new Error(`Cannot preserve ruby in unmatched TOC title (${sourcePosition(record.block)})`);
+    }
+  }
   const backImages = extractTrailingImages(chapters);
 
   const book = {
@@ -1562,7 +1746,7 @@ export function splitLightNovelBook(parsed, options = {}) {
     creditBlocks,
     preBlocks: summaryBlocks,
     summaryBlocks,
-    tocTitles,
+    tocTitles: tocRecords.map((record) => record.title),
     chapters,
     _rubyAnnotationConfig: {
       rules: rubyAnnotations.map((rule) => rule ? { ...rule } : rule), source: rubyAnnotationSource, volume,
@@ -1588,20 +1772,42 @@ export function splitLightNovelBook(parsed, options = {}) {
     if (block.type !== 'text') continue;
     const original = block.text;
     const protection = protectedRanges.get(block);
-    const result = applyWordingRules(block.text, { wording, ranges: protection?.matches || [], includeEdits: Boolean(protection) });
+    const result = block.rubySpans
+      ? mapNativeRubyTree(block.text, block.rubySpans, (text, ranges) => applyWordingRules(text, { wording, ranges }),
+        block._sourceLocation, block._rubyProtectedRanges || [])
+      : applyWordingRules(block.text, { wording, ranges: protection?.matches || [], includeEdits: Boolean(protection) });
+    const diagnosticContext = block._sourceLocation || { volume, source: sourcePath, paragraphIndex: sourceIndices.get(block) };
     for (const skipped of result.skipped) onDiagnostic?.({
-      volume, source: sourcePath, paragraphIndex: sourceIndices.get(block),
+      ...diagnosticContext,
       ruleId: skipped.ruleId, kind: 'text', start: skipped.start, end: skipped.end,
     });
     block.text = result.text;
+    if (block.rubySpans) {
+      block.rubySpans = result.spans;
+      if (block._rubyProtectedRanges) block._rubyProtectedRanges = result.protectedRanges;
+      reportNativeReadings(block.rubySpans, {
+        ...diagnosticContext, wording, onDiagnostic,
+      });
+    }
+    reportUnpairedReadings(block._unpairedReadings || [], { ...diagnosticContext, wording, onDiagnostic });
+    block._chineseConversion.fingerprint = blockConversionFingerprint(block);
     if (protection && (result.edits.length || result.skipped.length)) block._rubyAnnotationPlan = {
       sourceText: original, text: result.text, edits: result.edits, skipped: result.skipped,
       matches: result.ranges, noteBoundaries: noteBoundarySignature(result.text, protection.fixedFootnotes),
       source: sourcePath, paragraphIndex: sourceIndices.get(block),
     };
   }
-  book.tocTitles = tocTitles.map((text) => applyWordingRules(text, { wording }).text);
-  for (const chapter of chapters) chapter.title = applyWordingRules(chapter.title, { wording }).text;
+  book.tocTitles = tocRecords.map((record) => record.block
+    ? titleText(record.block) : applyWordingRules(record.title, { wording }).text);
+  for (const chapter of chapters) {
+    const { tocBlock, headingBlock } = chapterTitleSources.get(chapter);
+    chapter.title = tocBlock ? titleText(tocBlock) : applyWordingRules(chapter.title, { wording }).text;
+    if (tocBlock?.rubySpans?.length) chapter.titleRubySpans = tocBlock.rubySpans;
+    if (tocBlock?.rubySpans?.length || tocBlock?._rubyProtectedRanges?.length
+      || headingBlock?.rubySpans?.length || headingBlock?._rubyProtectedRanges?.length) {
+      chapter.heading = { text: titleText(headingBlock), rubySpans: headingBlock.rubySpans || [] };
+    }
+  }
   return book;
 }
 

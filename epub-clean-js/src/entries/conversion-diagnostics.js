@@ -6,6 +6,6 @@ export function printConversionDiagnostic(event) {
     return;
   }
   const position = event.paragraphIndex == null ? `目录项 ${event.tocEntryIndex ?? '?'}` : `段落 ${event.paragraphIndex}`;
-  const reading = event.kind === 'rt' ? `，ruby ${event.rubyIndex}，rt ${event.rtIndex}` : '';
+  const reading = event.kind === 'rt' ? `，ruby ${event.rubyIndex ?? '未知'}，rt ${event.rtIndex ?? '未知'}` : '';
   console.log(`跳过 ${event.ruleId}${edition}：卷 ${event.volume}，${event.source}，${position}，区间 [${event.start}, ${event.end})${reading}`);
 }

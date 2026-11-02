@@ -11,7 +11,7 @@ import path from 'node:path';
 import { parseHTML } from 'linkedom';
 
 import { readEpub } from '../../src/core/zip-io.js';
-import { applyWordingRules, simplifyBaseWithRuby, simplifyText, validateWording } from './chinese-conversion.js';
+import { applyWordingRules, BASE_CONVERSION_ID, conversionFingerprint, simplifyBaseWithRuby, simplifyText, validateWording } from './chinese-conversion.js';
 
 // hyread EPUB 内部根目录
 const R = 'item';
@@ -87,6 +87,7 @@ function parseTocEntries(xhtml, context) {
         return { text: baseline.text.slice(marker.start, marker.end), offset: marker.start };
       } : null)
       : { text: simplifyText((a.textContent || '').replace(/\s+/g, ''), { wording: context.wording }), rubySpans: [] };
+    assertTitleRubyRepresentable(block, { ...context, paragraphIndex });
     const text = block.text;
     if (text && !/^[ＣＯＮＴＥＮＴＳ]$/i.test(text) && !/^CONTENTS$/i.test(text)) {
       const file = href.split('#')[0];  // p-002.xhtml
@@ -175,6 +176,7 @@ function buildInlineBlock(pEl, context) {
   let text = '';
   const rubySpans = [];
   const rubyRanges = [];
+  const unpairedReadings = [];
   const markerRanges = [];
   const rubyElements = context.rubyElements || Array.from(pEl.querySelectorAll('ruby'));
   const normalize = (value) => {
@@ -242,9 +244,16 @@ function buildInlineBlock(pEl, context) {
               ...context, compact: false, rubyElements,
               reading: { rubyIndex, rtIndex: readings.indexOf(child) + 1 },
             });
+            if (reading._unpairedReadings) unpairedReadings.push(...reading._unpairedReadings);
+            if (!base && reading.text) unpairedReadings.push({
+              text: reading.text, rubyIndex, rtIndex: readings.indexOf(child) + 1,
+              ...(reading.rubySpans.length ? { rubySpans: reading.rubySpans, sourceReadings: reading._rubySourceReadings } : {}),
+            });
             if (base && reading.text) rubySpans.push({
               start: base.start, end: base.end, rt: reading.text, element: ruby,
+              _rubyIndex: rubyIndex, _rtIndex: readings.indexOf(child) + 1,
               ...(reading.rubySpans.length ? { rtSpans: reading.rubySpans } : {}),
+              ...(reading._rubySourceReadings?.length ? { _rtSourceReadings: reading._rubySourceReadings } : {}),
             });
           } else if (tag === 'rb' || tag === 'ruby') {
             const start = text.length;
@@ -257,7 +266,7 @@ function buildInlineBlock(pEl, context) {
       }
     };
     walk(ruby);
-    if (text.length > rubyStart) rubyRanges.push({ start: rubyStart, end: text.length });
+    if (text.length > rubyStart) rubyRanges.push({ start: rubyStart, end: text.length, element: ruby });
   };
   const walk = (node) => {
     for (const c of node.childNodes) {
@@ -313,12 +322,15 @@ function buildInlineBlock(pEl, context) {
   });
   text = result.text;
   const annotations = result.ranges.filter((span) => !span.protectedOnly)
-    .map(({ protectedOnly, element, ...span }) => ({
+    .map(({ protectedOnly, element, _rubyIndex, _rtIndex, _rtSourceReadings, ...span }) => ({
       element, span: { ...span, base: text.slice(span.start, span.end) },
+      source: { start: span.start, end: span.end, rt: span.rt, rubyIndex: _rubyIndex, rtIndex: _rtIndex,
+        ...(_rtSourceReadings ? { rtSpans: _rtSourceReadings } : {}) },
     }))
     .sort((a, b) => a.span.start - b.span.start || b.span.end - a.span.end
       || rubyElements.indexOf(a.element) - rubyElements.indexOf(b.element));
   const outputSpans = [];
+  const sourceReadings = [];
   for (const item of annotations) {
     let ancestor = item.element.parentElement?.closest('ruby');
     let parent;
@@ -327,18 +339,51 @@ function buildInlineBlock(pEl, context) {
         && candidate.span.start <= item.span.start && candidate.span.end >= item.span.end);
       ancestor = ancestor.parentElement?.closest('ruby');
     }
-    if (parent) (parent.span.children ||= []).push(item.span);
-    else outputSpans.push(item.span);
+    if (parent) {
+      (parent.span.children ||= []).push(item.span);
+      (parent.source.children ||= []).push(item.source);
+    } else {
+      outputSpans.push(item.span);
+      sourceReadings.push(item.source);
+    }
+  }
+  const protectedRanges = result.ranges.filter((span) => span.protectedOnly && span.element)
+    .map(({ start, end, element }) => {
+      let covered = start;
+      const paired = annotations.filter((item) => item.element === element).map((item) => item.span)
+        .sort((a, b) => a.start - b.start);
+      for (const span of paired) {
+        if (span.start > covered) break;
+        covered = Math.max(covered, span.end);
+      }
+      return { start, end, unpaired: covered < end };
+    });
+  if (!context.reading && !context.markerElements && !text && unpairedReadings.length) {
+    const position = [context.volume, context.source, context.paragraphIndex].filter((value) => value != null).join(':');
+    throw new Error(`Cannot preserve isolated unpaired ruby reading${position ? ` (${position})` : ''}`);
   }
   return {
     type: 'text', text, bold: false,
     rubySpans: outputSpans,
+    _chineseConversion: { base: BASE_CONVERSION_ID, wording: context.wording, fingerprint: conversionFingerprint(text, outputSpans, protectedRanges, {
+      unpairedReadings, sourceReadings, sourceLocation: diagnosticContext,
+    }) },
+    ...(protectedRanges.length ? { _rubyProtectedRanges: protectedRanges } : {}),
+    ...(sourceReadings.length ? { _rubySourceReadings: sourceReadings } : {}),
+    ...(unpairedReadings.length ? { _unpairedReadings: unpairedReadings } : {}),
+    _sourceLocation: diagnosticContext,
     ...(markers ? { markers } : {}),
   };
 }
 
 function titleRubyProperties(block) {
   return block?.rubySpans?.length ? { titleRubySpans: block.rubySpans } : {};
+}
+
+function assertTitleRubyRepresentable(block, context = block?._sourceLocation) {
+  if (!block?._rubyProtectedRanges?.some((range) => range.unpaired)) return;
+  const position = [context?.volume, context?.source, context?.paragraphIndex].filter((value) => value != null).join(':');
+  throw new Error(`Cannot preserve unpaired ruby in title${position ? ` (${position})` : ''}`);
 }
 
 function headingStyleNodes(element) {
@@ -639,6 +684,7 @@ export async function parseHyreadEpubToBook(sourceEpubPath, {
   for (const chPath of chapterFiles) {
     const fileName = chPath.split('/').pop(); // "p-001.xhtml"
     const { blocks, headingBlock } = parseChapterXhtml(read(chPath), { volume, source: chPath, wording, onDiagnostic });
+    assertTitleRubyRepresentable(headingBlock);
     fileBlocks.push({ fileName, blocks, headingBlock });
   }
 
@@ -663,6 +709,7 @@ export async function parseHyreadEpubToBook(sourceEpubPath, {
     } else {
       // 其他不在 TOC 中的（如 p-015 后记）：用抽出的大字标题作 h3，正文已不含标题。
       const titleBlock = headingBlock || blocks.find((b) => b.type === 'text');
+      assertTitleRubyRepresentable(titleBlock);
       const rawTitle = titleBlock?.text?.trim() || '';
       let title = rawTitle;
       // 检测后记
@@ -872,6 +919,7 @@ export async function parseAnotherDaysEpubToBook(sourceEpubPath, {
       seenAnyChapter = true;
       const source = `${R}/xhtml/${name}`;
       const { blocks, headingBlock } = parseAnotherDaysChapterXhtml(read(source), { volume, source, wording, onDiagnostic });
+      assertTitleRubyRepresentable(headingBlock);
       // 头部插入配对彩插
       const allBlocks = [...pendingFmatterBlocks, ...blocks];
       pendingFmatterBlocks = [];
@@ -895,6 +943,7 @@ export async function parseAnotherDaysEpubToBook(sourceEpubPath, {
         }
       }
       if (!titleBlock) titleBlock = headingBlock;
+      assertTitleRubyRepresentable(titleBlock);
       const rawTitle = titleBlock?.title || titleBlock?.text || '';
       const title = titleBlock === headingBlock && !titleBlock?.rubySpans?.length
         && /^后记|^後記|^あとがき/.test(rawTitle) ? '后记' : rawTitle;

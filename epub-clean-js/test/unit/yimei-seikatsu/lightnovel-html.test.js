@@ -21,6 +21,7 @@ import {
 import { rubyAnnotationsForVolume } from '../../../src/entries/lightnovel-html-simple-batch.js';
 import { readEpub, writeEpub } from '../../../src/core/zip-io.js';
 import { parseHyreadEpubToBook, parseAnotherDaysEpubToBook } from '../../../books/yimei-seikatsu/hyread-parser.js';
+import { printConversionDiagnostic } from '../../../src/entries/conversion-diagnostics.js';
 import { writeHyreadFixture, bodyParagraph as hyreadP } from '../../helpers/hyread-fixture.js';
 
 for (const mode of ['write', 'rename']) {
@@ -187,22 +188,20 @@ test('HyRead renders nested ruby and keeps a chapter heading distinct from its T
   assert.match(epub.entries['OEBPS/Text/TOC.xhtml'].toString('utf8'), /智能手机/);
 });
 
-test('native nested ruby and inline footnotes retain each other in both directions', async (t) => {
+test('native nested ruby inside an inline footnote retains its readings', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'ln-hyread-nested-notes-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const source = join(dir, 'source.epub');
   const ref = join(dir, 'ref.epub');
   const out = join(dir, 'out.epub');
   await writeHyreadFixture(source, { pages: { 'p-002.xhtml':
-    hyreadP('<ruby>甲<ruby>乙（註：解說）丙<rt>inner</rt></ruby>丁<rt>outer</rt></ruby>')
-    + hyreadP('前（註：<ruby>甲<ruby>乙<rt>inner</rt></ruby><rt>outer</rt></ruby>解說）後'),
+    hyreadP('前（註：<ruby>甲<ruby>乙<rt>inner</rt></ruby><rt>outer</rt></ruby>解說）後'),
   } });
   await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
   const book = await parseHyreadEpubToBook(source, { volume: '13' });
   await buildLightNovelEpubFromBook(book, { sourceImages: book._sourceImages, refEpubPath: ref, outEpubPath: out, includeSpecials: false });
   const epub = await readEpub(out);
   const chapter = epub.entries['OEBPS/Text/chapter0001.xhtml'].toString('utf8');
-  assert.match(chapter, /<ruby>甲<ruby>乙<sub><a\b[\s\S]*?<\/a><\/sub>丙<rt>inner<\/rt><\/ruby>丁<rt>outer<\/rt><\/ruby>/);
   assert.match(chapter, /<ruby>甲<ruby>乙<rt>inner<\/rt><\/ruby><rt>outer<\/rt><\/ruby>解说/);
 });
 
@@ -213,7 +212,7 @@ test('fixed footnotes inside native ruby do not remove the reading', async (t) =
   const ref = join(dir, 'ref.epub');
   const out = join(dir, 'out.epub');
   await writeHyreadFixture(source, {
-    pages: { 'p-002.xhtml': hyreadP('第一章正文'), 'p-003.xhtml': hyreadP('前文') + hyreadP('<ruby>甲戀愛生活小說乙<rt>reading</rt></ruby>') },
+    pages: { 'p-002.xhtml': hyreadP('第一章正文'), 'p-003.xhtml': hyreadP('前<ruby><rt>智慧型手機</rt></ruby>文') + hyreadP('<ruby>甲戀愛生活小說乙<rt>reading</rt></ruby>') },
     toc: [['p-002.xhtml', '第一章'], ['p-003.xhtml', '第二章']],
   });
   await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
@@ -221,18 +220,18 @@ test('fixed footnotes inside native ruby do not remove the reading', async (t) =
   await buildLightNovelEpubFromBook(book, { sourceImages: book._sourceImages, refEpubPath: ref, outEpubPath: out, volume: 'another-days', includeSpecials: false });
   const epub = await readEpub(out);
   const chapter = epub.entries['OEBPS/Text/chapter0002.xhtml'].toString('utf8');
+  assert.match(chapter, /<p>前文<\/p>/);
   assert.match(chapter, /<ruby>甲恋爱生活小说<sub><a\b[\s\S]*?<\/a><\/sub>乙<rt>reading<\/rt><\/ruby>/);
 });
 
-test('reading-nested ruby and ruby enclosing a whole note are retained in the EPUB', async (t) => {
+test('reading-nested ruby retains its readings in the EPUB', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'ln-hyread-reading-ruby-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const source = join(dir, 'source.epub');
   const ref = join(dir, 'ref.epub');
   const out = join(dir, 'out.epub');
   await writeHyreadFixture(source, { pages: { 'p-002.xhtml':
-    hyreadP('<ruby>甲<rt><ruby>乙<rt>智慧型手機</rt></ruby></rt></ruby>')
-    + hyreadP('<ruby>（註：解說）<rt>reading</rt></ruby>'),
+    hyreadP('<ruby>甲<rt><ruby>乙<rt>智慧型手機</rt></ruby></rt></ruby>'),
   } });
   await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
   const book = await parseHyreadEpubToBook(source, { volume: '13', wording: 'mainland' });
@@ -240,7 +239,29 @@ test('reading-nested ruby and ruby enclosing a whole note are retained in the EP
   const epub = await readEpub(out);
   const chapter = epub.entries['OEBPS/Text/chapter0001.xhtml'].toString('utf8');
   assert.match(chapter, /<ruby>甲<rt><ruby>乙<rt>智慧型手机<\/rt><\/ruby><\/rt><\/ruby>/);
-  assert.match(chapter, /<ruby><sub><a\b[\s\S]*?<\/a><\/sub><rt>reading<\/rt><\/ruby>/);
+});
+
+test('ruby enclosing an inline footnote fails with source location and preserves existing output', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-hyread-note-ruby-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const source = join(dir, 'source.epub');
+  const ref = join(dir, 'ref.epub');
+  const out = join(dir, 'out.epub');
+  await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
+  const previous = Buffer.from('existing output');
+  for (const ruby of [
+    '<ruby>（註：水星）<rt>すいせい</rt></ruby>',
+    '<ruby>甲（註：水星）乙<rt>reading</rt></ruby>',
+    '<ruby>甲<ruby>乙（註：水星）丙<rt>inner</rt></ruby>丁<rt>outer</rt></ruby>',
+  ]) {
+    await writeHyreadFixture(source, { pages: { 'p-002.xhtml': hyreadP(`智慧型手機${ruby}`) } });
+    await writeFile(out, previous);
+    const book = await parseHyreadEpubToBook(source, { volume: '13', wording: 'mainland' });
+    await assert.rejects(buildLightNovelEpubFromBook(book, {
+      sourceImages: book._sourceImages, refEpubPath: ref, outEpubPath: out, includeSpecials: false,
+    }), /Cannot preserve ruby across a footnote boundary.*13:item\/xhtml\/p-002\.xhtml:1/);
+    assert.deepEqual(await readFile(out), previous);
+  }
 });
 
 test('a TOC link surrounded by ruby retains its reading in the EPUB', async (t) => {
@@ -431,6 +452,362 @@ async function buildHtmlFixture(t, html, options = {}) {
   });
   return { ...result, htmlPath, events, epub: await readEpub(outEpubPath) };
 }
+
+function parsedWithNativeRuby(text, rubySpans) {
+  const parsed = parseLightNovelArticle(extractArticleHtml(SAMPLE_HTML));
+  const block = parsed.blocks.find((item) => item.type === 'text' && item.text.includes('暑假在昨天告終。'));
+  block.text = text;
+  block.rubySpans = rubySpans;
+  return parsed;
+}
+
+test('splitLightNovelBook maps caller-supplied ruby across shorter wording and renders it', async (t) => {
+  const parsed = parsedWithNativeRuby('智慧型手機淺村', [{ start: 5, end: 7, base: '淺村', rt: '淺村' }]);
+  const book = splitLightNovelBook(parsed, { wording: 'mainland', sourcePath: 'inline.html' });
+  const block = book.chapters[0].blocks[0];
+  assert.equal(block.text, '智能手机浅村');
+  assert.deepEqual(block.rubySpans, [{ start: 4, end: 6, base: '浅村', rt: '浅村' }]);
+  const dir = await mkdtemp(join(tmpdir(), 'ln-split-native-ruby-'));
+  const originalFetch = globalThis.fetch;
+  t.after(async () => { globalThis.fetch = originalFetch; await rm(dir, { recursive: true, force: true }); });
+  const ref = join(dir, 'ref.epub');
+  const out = join(dir, 'out.epub');
+  await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
+  globalThis.fetch = async () => ({ ok: true, headers: { get: () => 'image/jpeg' }, arrayBuffer: async () => new Uint8Array([1]).buffer });
+  await buildLightNovelEpubFromBook(book, { refEpubPath: ref, outEpubPath: out, includeSpecials: false });
+  const epub = await readEpub(out);
+  assert.match(epub.entries['OEBPS/Text/chapter0001.xhtml'].toString('utf8'), /智能手机<ruby>浅村<rt>浅村<\/rt><\/ruby>/);
+});
+
+test('splitLightNovelBook maps nested native ruby and reading offsets after base conversion', () => {
+  const parsed = parsedWithNativeRuby('二噁英甲乙', [{
+    start: 3, end: 5, base: '甲乙', rt: '二噁英甲',
+    children: [{ start: 4, end: 5, base: '乙', rt: '內' }],
+    rtSpans: [{ start: 3, end: 4, base: '甲', rt: '讀音' }],
+  }]);
+  const block = splitLightNovelBook(parsed).chapters[0].blocks[0];
+  assert.equal(block.text, '二𫫇英甲乙');
+  assert.deepEqual(block.rubySpans, [{
+    start: 4, end: 6, base: '甲乙', rt: '二𫫇英甲',
+    children: [{ start: 5, end: 6, base: '乙', rt: '内' }],
+    rtSpans: [{ start: 4, end: 5, base: '甲', rt: '读音' }],
+  }]);
+});
+
+test('splitLightNovelBook protects caller-supplied ruby and reports text and reading matches', () => {
+  const parsed = parsedWithNativeRuby('智慧型手機甲', [{ start: 0, end: 3, base: '智慧型', rt: '智慧型手機' }]);
+  const paragraphIndex = parsed.blocks.filter((item) => item.type === 'text').findIndex((item) => item.text === '智慧型手機甲') + 1;
+  const events = [];
+  const block = splitLightNovelBook(parsed, {
+    wording: 'mainland', sourcePath: 'inline.html', onDiagnostic: (event) => events.push(event),
+  }).chapters[0].blocks[0];
+  assert.equal(block.text, '智慧型手机甲');
+  assert.deepEqual(block.rubySpans, [{ start: 0, end: 3, base: '智慧型', rt: '智慧型手机' }]);
+  assert.deepEqual(events.find((event) => event.kind === 'text'), {
+    volume: '11', source: 'inline.html', paragraphIndex, ruleId: 'smartphone', kind: 'text', start: 0, end: 5,
+  });
+  assert.deepEqual(events.find((event) => event.kind === 'rt'), {
+    volume: '11', source: 'inline.html', paragraphIndex, ruleId: 'smartphone', kind: 'rt',
+    rubyIndex: null, rtIndex: null, start: 0, end: 5,
+  });
+});
+
+test('splitLightNovelBook reports provided reading source indexes without guessing', () => {
+  const parsed = parsedWithNativeRuby('甲', [{
+    start: 0, end: 1, base: '甲', rt: '智慧型手機', rubyIndex: 1, rtIndex: 2,
+    rtSpans: [{ start: 0, end: 3, base: '智慧型', rt: '智慧型手機', rubyIndex: 2, rtIndex: 1 }],
+  }]);
+  const events = [];
+  const block = splitLightNovelBook(parsed, { wording: 'mainland', onDiagnostic: (event) => events.push(event) }).chapters[0].blocks[0];
+  assert.equal(block.rubySpans[0].rt, '智慧型手机');
+  assert.equal(block.rubySpans[0].rtSpans[0].rt, '智慧型手机');
+  assert.deepEqual(events.filter((event) => event.kind === 'rt').map(({ rubyIndex, rtIndex, start, end }) => ({ rubyIndex, rtIndex, start, end })), [
+    { rubyIndex: 1, rtIndex: 2, start: 0, end: 5 },
+    { rubyIndex: 2, rtIndex: 1, start: 0, end: 5 },
+  ]);
+});
+
+test('unknown source reading indexes are displayed as unknown', () => {
+  const lines = [];
+  const original = console.log;
+  try {
+    console.log = (line) => lines.push(line);
+    printConversionDiagnostic({ kind: 'rt', ruleId: 'smartphone', volume: '11', source: 'inline', paragraphIndex: 1,
+      start: 0, end: 5, rubyIndex: null, rtIndex: null });
+  } finally {
+    console.log = original;
+  }
+  assert.match(lines[0], /ruby 未知，rt 未知/);
+});
+
+test('splitLightNovelBook preserves native ruby in TOC and chapter headings', async (t) => {
+  const parsed = parseLightNovelArticle(extractArticleHtml(SAMPLE_HTML));
+  const titles = parsed.blocks.filter((block) => block.type === 'text' && block.text.includes('序幕　淺村悠太'));
+  assert.equal(titles.length, 2);
+  for (const title of titles) {
+    title.text = '第一章智慧型手機';
+    title.rubySpans = [{ start: 3, end: 6, base: '智慧型', rt: 'Smart' }];
+  }
+  const events = [];
+  const book = splitLightNovelBook(parsed, { wording: 'mainland', sourcePath: 'inline.html', onDiagnostic: (event) => events.push(event) });
+  assert.equal(book.tocTitles[0], '第一章智慧型手机');
+  assert.equal(book.chapters[0].title, '第一章智慧型手机');
+  assert.deepEqual(book.chapters[0].titleRubySpans, [{ start: 3, end: 6, base: '智慧型', rt: 'Smart' }]);
+  assert.equal(book.chapters[0].heading.text, '第一章智慧型手机');
+  assert.equal(events.filter((event) => event.kind === 'text' && event.ruleId === 'smartphone').length, 2);
+  const dir = await mkdtemp(join(tmpdir(), 'ln-native-title-'));
+  const originalFetch = globalThis.fetch;
+  t.after(async () => { globalThis.fetch = originalFetch; await rm(dir, { recursive: true, force: true }); });
+  const ref = join(dir, 'ref.epub');
+  const out = join(dir, 'out.epub');
+  await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
+  globalThis.fetch = async () => ({ ok: true, headers: { get: () => 'image/jpeg' }, arrayBuffer: async () => new Uint8Array([1]).buffer });
+  await buildLightNovelEpubFromBook(book, { refEpubPath: ref, outEpubPath: out, includeSpecials: false });
+  const epub = await readEpub(out);
+  for (const file of ['chapter0001.xhtml', 'TOC.xhtml', 'navigation-documents.xhtml']) {
+    assert.match(epub.entries[`OEBPS/Text/${file}`].toString('utf8'), /第一章<ruby>智慧型<rt>Smart<\/rt><\/ruby>手机/);
+  }
+});
+
+test('splitLightNovelBook preserves each source title independently when only one has ruby', () => {
+  for (const tocAnnotated of [true, false]) {
+    const parsed = parseLightNovelArticle(extractArticleHtml(SAMPLE_HTML));
+    const titles = parsed.blocks.filter((block) => block.type === 'text' && block.text.includes('序幕　淺村悠太'));
+    for (const title of titles) title.text = '第一章智慧型手機';
+    titles[tocAnnotated ? 0 : 1].rubySpans = [{ start: 3, end: 6, base: '智慧型', rt: 'Smart' }];
+    const chapter = splitLightNovelBook(parsed, { wording: 'mainland' }).chapters[0];
+    assert.equal(chapter.title, tocAnnotated ? '第一章智慧型手机' : '第一章智能手机');
+    assert.equal(chapter.heading.text, tocAnnotated ? '第一章智能手机' : '第一章智慧型手机');
+    assert.equal(chapter.titleRubySpans?.length || 0, tocAnnotated ? 1 : 0);
+    assert.equal(chapter.heading.rubySpans?.length || 0, tocAnnotated ? 0 : 1);
+  }
+});
+
+test('splitLightNovelBook rejects titles whose ruby cannot survive normalization or has no chapter', () => {
+  for (const unmatched of [false, true]) {
+    const parsed = parseLightNovelArticle(extractArticleHtml(SAMPLE_HTML));
+    const titles = parsed.blocks.filter((block) => block.type === 'text' && block.text.includes('序幕　淺村悠太'));
+    titles[0].text = unmatched ? '另一章智慧型手機' : '　第一章智慧型手機　';
+    titles[0].rubySpans = [{ start: 3, end: 6, base: titles[0].text.slice(3, 6), rt: 'Smart' }];
+    if (!unmatched) titles[1].text = titles[0].text;
+    assert.throws(() => splitLightNovelBook(parsed, { sourcePath: 'inline.html' }), /Cannot preserve ruby.*inline\.html/);
+  }
+});
+
+test('splitLightNovelBook rejects native ruby in metadata it cannot render', () => {
+  const parsed = parseLightNovelArticle(extractArticleHtml(SAMPLE_HTML));
+  const title = parsed.blocks.find((block) => block.type === 'text');
+  title.rubySpans = [{ start: 0, end: 2, base: title.text.slice(0, 2), rt: 'title' }];
+  assert.throws(() => splitLightNovelBook(parsed, { sourcePath: 'inline.html' }), /Cannot preserve ruby.*inline\.html/);
+});
+
+test('splitLightNovelBook retains protection for unpaired HyRead ruby bases', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-unpaired-split-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const source = join(dir, 'source.epub');
+  await writeHyreadFixture(source, { pages: { 'p-002.xhtml':
+    hyreadP('智慧型手機<ruby><rb>水</rb><rt>water</rt><rb>智慧型</rb></ruby>手機'),
+  } });
+  const hyread = await parseHyreadEpubToBook(source, { volume: '13' });
+  const parsed = parsedWithNativeRuby('placeholder', []);
+  const target = parsed.blocks.find((block) => block.type === 'text' && block.text === 'placeholder');
+  Object.assign(target, hyread.chapters[0].blocks[0]);
+  const events = [];
+  const block = splitLightNovelBook(parsed, { wording: 'mainland', onDiagnostic: (event) => events.push(event) }).chapters[0].blocks[0];
+  assert.equal(block.text, '智能手机水智慧型手机');
+  assert.deepEqual(block.rubySpans, [{ start: 4, end: 5, base: '水', rt: 'water', rubyIndex: 1, rtIndex: 1 }]);
+  assert.ok(events.some((event) => event.kind === 'text' && event.ruleId === 'smartphone' && event.start === 6 && event.end === 11));
+});
+
+test('splitLightNovelBook does not reconvert HyRead text or readings', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-hyread-once-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const source = join(dir, 'source.epub');
+  await writeHyreadFixture(source, { pages: { 'p-002.xhtml': hyreadP('顯著<ruby>甲<rt>顯著</rt></ruby>') + hyreadP('顯著') } });
+  const hyread = await parseHyreadEpubToBook(source, { volume: '13' });
+  const parsed = parsedWithNativeRuby('placeholder', []);
+  const index = parsed.blocks.findIndex((block) => block.text === 'placeholder');
+  parsed.blocks.splice(index, 1, ...hyread.chapters[0].blocks);
+  const [block, plain] = splitLightNovelBook(parsed, { wording: 'mainland' }).chapters[0].blocks;
+  assert.equal(block.text, '显著甲');
+  assert.equal(block.rubySpans[0].rt, '显著');
+  assert.equal(block.text.slice(block.rubySpans[0].start, block.rubySpans[0].end), '甲');
+  assert.equal(plain.text, '显著');
+  const withConvertedTitle = parseLightNovelArticle(extractArticleHtml(SAMPLE_HTML));
+  Object.assign(withConvertedTitle.blocks.find((item) => item.type === 'text'), hyread.chapters[0].blocks[1]);
+  withConvertedTitle.title = '显著';
+  assert.equal(splitLightNovelBook(withConvertedTitle).title, '显著 [台简]');
+});
+
+test('splitLightNovelBook retains HyRead source positions and reading indexes', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-hyread-source-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const source = join(dir, 'source.epub');
+  await writeHyreadFixture(source, { pages: { 'p-002.xhtml': '<p id="mokuji-skip">略</p>'
+    + hyreadP('<ruby>甲<ruby>乙<rt>智慧型手機</rt></ruby><rt>智慧型手機</rt></ruby>')
+    + hyreadP('<ruby>智慧型<rt>Smart</rt></ruby>手機'),
+  } });
+  const hyread = await parseHyreadEpubToBook(source, { volume: '13' });
+  const parsed = parsedWithNativeRuby('placeholder', []);
+  const index = parsed.blocks.findIndex((block) => block.text === 'placeholder');
+  parsed.blocks.splice(index, 1, ...JSON.parse(JSON.stringify(hyread.chapters[0].blocks)));
+  const events = [];
+  splitLightNovelBook(parsed, { volume: '11', wording: 'mainland', sourcePath: 'inline.html', onDiagnostic: (event) => events.push(event) });
+  assert.deepEqual(events.filter((event) => event.kind === 'rt').map(({ volume, source: file, paragraphIndex, rubyIndex, rtIndex }) =>
+    ({ volume, source: file, paragraphIndex, rubyIndex, rtIndex })), [
+    { volume: '13', source: 'item/xhtml/p-002.xhtml', paragraphIndex: 2, rubyIndex: 2, rtIndex: 1 },
+    { volume: '13', source: 'item/xhtml/p-002.xhtml', paragraphIndex: 2, rubyIndex: 1, rtIndex: 2 },
+  ]);
+  assert.ok(events.some((event) => event.kind === 'text' && event.volume === '13'
+    && event.source === 'item/xhtml/p-002.xhtml' && event.paragraphIndex === 3));
+});
+
+test('splitLightNovelBook rejects already localized text when asked to restore Taiwan wording', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-hyread-localized-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const source = join(dir, 'source.epub');
+  await writeHyreadFixture(source, { pages: { 'p-002.xhtml': hyreadP('智慧型手機') } });
+  const hyread = await parseHyreadEpubToBook(source, { volume: '13', wording: 'mainland' });
+  const parsed = parsedWithNativeRuby('placeholder', []);
+  Object.assign(parsed.blocks.find((block) => block.text === 'placeholder'), hyread.chapters[0].blocks[0]);
+  assert.throws(() => splitLightNovelBook(parsed, { wording: 'taiwan' }), /Cannot restore Taiwan wording.*item\/xhtml\/p-002\.xhtml:1/);
+});
+
+test('splitLightNovelBook rejects stale conversion state after text or reading edits', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-hyread-changed-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const source = join(dir, 'source.epub');
+  await writeHyreadFixture(source, { pages: { 'p-002.xhtml': hyreadP('顯著<ruby>甲<rt>顯著</rt></ruby>') } });
+  const hyread = await parseHyreadEpubToBook(source, { volume: '13' });
+  for (const change of ['text', 'reading', 'span', 'protected-range', 'source-index', 'source-location']) {
+    const block = JSON.parse(JSON.stringify(hyread.chapters[0].blocks[0]));
+    if (change === 'text') block.text += '顯著';
+    else if (change === 'reading') block.rubySpans[0].rt = '顯著';
+    else if (change === 'span') block.rubySpans[0].start = 0;
+    else if (change === 'protected-range') block._rubyProtectedRanges[0].start = 0;
+    else if (change === 'source-index') block._rubySourceReadings[0].rtIndex = 99;
+    else block._sourceLocation.paragraphIndex = 99;
+    const parsed = parsedWithNativeRuby('placeholder', []);
+    Object.assign(parsed.blocks.find((item) => item.text === 'placeholder'), block);
+    assert.throws(() => splitLightNovelBook(parsed), /Cannot reuse changed Chinese conversion.*item\/xhtml\/p-002\.xhtml/);
+  }
+});
+
+test('splitLightNovelBook rejects reassembling already mainland-converted blocks', () => {
+  for (const manual of [false, true]) {
+    const parsed = parsedWithNativeRuby(manual ? '智慧型手機ABC' : '智慧型手機螢幕', []);
+    const input = parsed.blocks.find((block) => block.type === 'text' && block.text.includes('智慧型手機'));
+    if (manual) delete input.rubySpans;
+    const first = splitLightNovelBook(parsed, {
+      wording: 'mainland', ...(manual ? { rubyAnnotations: [{ text: 'ABC', base: 'A', ruby: 'one' }] } : {}),
+    }).chapters[0].blocks[0];
+    assert.equal(first.text, manual ? '智能手机ABC' : '智能手机萤幕');
+    const again = parsedWithNativeRuby('placeholder', []);
+    Object.assign(again.blocks.find((block) => block.text === 'placeholder'), JSON.parse(JSON.stringify(first)));
+    if (manual) delete again.blocks.find((block) => block.text === '智能手机ABC').rubySpans;
+    assert.throws(() => splitLightNovelBook(again, {
+      wording: 'mainland', ...(manual ? { rubyAnnotations: [{ text: 'ABC', base: 'B', ruby: 'two' }] } : {}),
+    }), /Cannot reprocess mainland wording/);
+  }
+});
+
+test('splitLightNovelBook converts a fallback book title only once', () => {
+  const parsed = parseLightNovelArticle(extractArticleHtml(SAMPLE_HTML));
+  delete parsed.title;
+  parsed.blocks.find((block) => block.type === 'text').text = '顯著';
+  assert.equal(splitLightNovelBook(parsed).title, '显著 [台简]');
+});
+
+test('splitLightNovelBook retains diagnostics for unpaired HyRead readings', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-unpaired-readings-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const source = join(dir, 'source.epub');
+  for (const html of [
+    '<ruby>甲<rt>first</rt><rt>智慧型手機</rt></ruby>',
+    '前<ruby><rt><ruby>智慧型<rt>智慧型手機</rt></ruby>手機</rt></ruby>后',
+  ]) {
+    await writeHyreadFixture(source, { pages: { 'p-002.xhtml': hyreadP(html) } });
+    const directEvents = [];
+    await parseHyreadEpubToBook(source, { volume: '13', wording: 'mainland', onDiagnostic: (event) => directEvents.push(event) });
+    const hyread = await parseHyreadEpubToBook(source, { volume: '13' });
+    const parsed = parsedWithNativeRuby('placeholder', []);
+    Object.assign(parsed.blocks.find((block) => block.text === 'placeholder'), JSON.parse(JSON.stringify(hyread.chapters[0].blocks[0])));
+    const events = [];
+    splitLightNovelBook(parsed, { wording: 'mainland', onDiagnostic: (event) => events.push(event) });
+    const sortEvents = (items) => items.filter((event) => event.kind === 'rt')
+      .sort((a, b) => a.rubyIndex - b.rubyIndex || a.rtIndex - b.rtIndex);
+    assert.ok(directEvents.some((event) => event.kind === 'rt'));
+    assert.deepEqual(sortEvents(events), sortEvents(directEvents));
+    const changed = JSON.parse(JSON.stringify(hyread.chapters[0].blocks[0]));
+    changed._unpairedReadings[0].text += '修改';
+    const corrupted = parsedWithNativeRuby('placeholder', []);
+    Object.assign(corrupted.blocks.find((block) => block.text === 'placeholder'), changed);
+    assert.throws(() => splitLightNovelBook(corrupted, { wording: 'mainland' }), /Cannot reuse changed Chinese conversion/);
+  }
+});
+
+test('isolated unpaired readings fail safely without changing existing output', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-isolated-reading-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const source = join(dir, 'source.epub');
+  const ref = join(dir, 'ref.epub');
+  const out = join(dir, 'out.epub');
+  await writeHyreadFixture(source, {
+    pages: { 'p-002.xhtml': hyreadP('<ruby><rt>智慧型手機</rt></ruby>')
+      + '<p><span class="gfont40">第一章</span></p>' + hyreadP('正文') },
+    toc: [['p-002.xhtml', '第一章']],
+  });
+  await writeEpub(ref, { 'OEBPS/Styles/stylesheet.css': '', 'OEBPS/Misc/script.js': '' });
+  const previous = Buffer.from('existing output');
+  for (const parser of [parseHyreadEpubToBook, parseAnotherDaysEpubToBook]) {
+    for (const wording of ['taiwan', 'mainland']) {
+      await writeFile(out, previous);
+      const events = [];
+      await assert.rejects(async () => {
+        const book = await parser(source, { volume: '13', wording, onDiagnostic: (event) => events.push(event) });
+        await buildLightNovelEpubFromBook(book, { sourceImages: book._sourceImages, refEpubPath: ref, outEpubPath: out, includeSpecials: false });
+      }, /Cannot preserve isolated unpaired ruby reading.*13:item\/xhtml\/p-002\.xhtml:1/);
+      assert.deepEqual(await readFile(out), previous);
+      if (wording === 'mainland') assert.ok(events.some((event) => event.kind === 'rt' && event.rubyIndex === 1 && event.rtIndex === 1));
+    }
+  }
+});
+
+test('unpaired ruby in HyRead headings fails safely with its source position', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'ln-hyread-unpaired-heading-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const source = join(dir, 'source.epub');
+  await writeHyreadFixture(source, {
+    pages: { 'p-002.xhtml': '<p><span class="gfont40"><ruby>智慧型</ruby>手機</span></p>' + hyreadP('正文') },
+    toc: [['p-002.xhtml', '智慧型手機']],
+  });
+  for (const parser of [parseHyreadEpubToBook, parseAnotherDaysEpubToBook]) {
+    await assert.rejects(parser(source, { volume: '13', wording: 'mainland' }),
+      /Cannot preserve unpaired ruby in title.*item\/xhtml\/p-002\.xhtml:1/);
+  }
+});
+
+test('splitLightNovelBook rejects unpaired ruby in TOC and chapter titles', () => {
+  const parsed = parseLightNovelArticle(extractArticleHtml(SAMPLE_HTML));
+  const titles = parsed.blocks.filter((block) => block.type === 'text' && block.text.includes('序幕　淺村悠太'));
+  for (const title of titles) {
+    title.text = '第一章智慧型手機';
+    title.rubySpans = [];
+    title._rubyProtectedRanges = [{ start: 3, end: 6, unpaired: true }];
+  }
+  assert.throws(() => splitLightNovelBook(parsed, { wording: 'mainland', sourcePath: 'inline.html' }),
+    /Cannot preserve unpaired ruby in title.*inline\.html/);
+});
+
+test('splitLightNovelBook rejects malformed native ruby trees before rendering', () => {
+  for (const spans of [
+    [{ start: 1, end: 2, base: '乙', rt: 'b', children: [{ start: 0, end: 1, base: '甲', rt: 'a' }] }],
+    [{ start: 0, end: 2, base: '甲乙', rt: 'a' }, { start: 1, end: 3, base: '乙丙', rt: 'b' }],
+  ]) {
+    const parsed = parsedWithNativeRuby('甲乙丙', spans);
+    assert.throws(() => splitLightNovelBook(parsed, { sourcePath: 'bad.html' }), /Cannot map ruby.*bad\.html/);
+  }
+});
 
 test('HTML protects a rendered manual ruby match and reports its source block', async (t) => {
   const html = SAMPLE_HTML.replace('暑假在昨天告終。', '𫫇智慧型手機Smartphone');

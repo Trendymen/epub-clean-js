@@ -2,6 +2,16 @@ import { createHash } from 'node:crypto';
 import * as OpenCC from 'opencc-js';
 
 const TW2S_DIGEST = 'b6b56517a0676e17f6d5ff9b77eaa68397814653dc5b83347d831c9a3c5f3a54';
+export const BASE_CONVERSION_ID = 'opencc-js@1.4.2:tw2s';
+export function conversionFingerprint(text, spans = [], protectedRanges = [], {
+  unpairedReadings = [], sourceReadings = [], sourceLocation = null,
+} = {}) {
+  const readings = (items) => items.map((span) => [span.start, span.end, span.rt, span.rubyIndex, span.rtIndex,
+    readings(span.children || []), readings(span.rtSpans || [])]);
+  const protectedOffsets = protectedRanges.map(({ start, end, unpaired }) => [start, end, unpaired]);
+  const location = sourceLocation && [sourceLocation.volume, sourceLocation.source, sourceLocation.paragraphIndex, sourceLocation.tocEntryIndex];
+  return createHash('sha256').update(JSON.stringify([text, readings(spans), protectedOffsets, unpairedReadings, sourceReadings, location])).digest('hex');
+}
 const converter = OpenCC.Converter({ from: 'tw', to: 'cn' });
 const WORDING_RULES = [
   { id: 'network-on', source: '网路上', target: '网络上' },
