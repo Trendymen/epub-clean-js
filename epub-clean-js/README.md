@@ -51,6 +51,16 @@ node bin/cli.js hyread-to-simple --volume another-days --source /path/to/source.
 
 `--source`、`--ref`、`--style-ref` 分别覆盖自动查找的字段，已提供的输入不依赖默认目录存在。11/12/13 省略 `--style-ref` 时继续查找默认同卷 healed 源；其他数字卷以及 `another-days` 在同时显式提供 `--source` 和 `--ref` 时，允许省略 `--style-ref`，只使用基础布局。数字卷需要自动补齐 source/ref 时，也会要求同卷 healed 源。`another-days`（含 `an`、`AN` 别名）必须显式提供 source/ref。单卷默认附特典，`--no-include-specials` 生成普通版。
 
+三个台简入口 `hyread-to-simple`、`lightnovel-html-to-epub` 和 `build-yimei-simple` 都支持 `--wording taiwan|mainland`。默认 `taiwan` 使用固定版本的 OpenCC `tw2s` 转简体，保留台版措辞；例如“網路”“訊息”变成“网路”“讯息”。`mainland` 只额外替换已核对的三个词组：“网路上 → 网络上”“手机萤幕 → 手机屏幕”“智慧型手机 → 智能手机”，不是完整的大陆用词转换。
+
+```bash
+node bin/cli.js hyread-to-simple --volume 14 --out /path/to/14.epub --wording mainland
+npm run build:yimei-simple -- --volumes 14 --wording mainland
+node bin/cli.js lightnovel-html-to-epub --html /path/to/11.html --ref /path/to/ref.epub --out /path/to/11.epub --wording mainland
+```
+
+可选词组与原生 ruby 本体或实际渲染的手工注音匹配范围相交时，该次替换会跳过。命令会报告源文件、段落、规则和 UTF-16 区间；原生读音命中还会报告 ruby 和 rt 序号。HTML 的每条显式 `--ruby` 规则会报告实际命中次数，零命中时提示检查匹配文本。部分匹配丢失无法仅靠总次数发现，需要对照新旧正文检查。程序接口可通过 `wording` 选择模式，并用 `onDiagnostic(event)` 接收这些记录。
+
 HyRead 入口按源文位置识别章节标题和原生 ruby，本体与读音都繁转简，不会把正文中相同的普通字符串自动改成 ruby。HTML 入口保留已有显式 `--ruby 'text|base|ruby'` 参数，用于为普通文本指定替换串、ruby 本体与读音；它属于文本匹配兼容模式，不能恢复源书中已经丢失的注音位置。生成时统一 OPF/NCX 的 UUID，修复导入脚注的重复 ID，并在发布输出前检查 EPUB 必需元数据、内部资源与片段链接、重复 ID、CSS 引用、manifest 资源存在性和 OPF/NCX 标识一致性；校验失败时保留已有输出。当前运行时不检查 spine 的 itemref/idref 与 manifest 的对应关系。结构检查不能替代阅读器显示验收。
 
 ### migrate-translation（09 卷台版译文迁移，绑义妹生活）

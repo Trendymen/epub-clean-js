@@ -19,6 +19,8 @@ import { parseHyreadEpubToBook, parseAnotherDaysEpubToBook } from '../../books/y
 import { buildLightNovelEpubFromBook } from '../../books/yimei-seikatsu/lightnovel-html/index.js';
 import { defaultRoot, resolveInputs } from './lightnovel-html-simple-batch.js';
 import { assertSourceFontsAvailable } from '../core/font-subset.js';
+import { validateWording } from '../../books/yimei-seikatsu/chinese-conversion.js';
+import { printConversionDiagnostic } from './conversion-diagnostics.js';
 
 // 短篇合集卷走专门 parser（保留 p-fmatter 彩插与配对正文的 spine 穿插位置）
 const ANOTHER_DAYS_VOLUMES = new Set(['another-days', 'an', 'AN']);
@@ -35,7 +37,10 @@ export async function buildHyreadToSimple({
   creditName = '嘻嘻嘻',
   creditSource = null,
   creditInput = null,
+  wording = 'taiwan',
+  onDiagnostic,
 }) {
+  validateWording(wording);
   if (!outEpubPath) throw new Error('Missing --out');
   if (!/^\d+$/.test(volume) && (!sourceEpubPath || !refEpubPath)) {
     throw new Error(`Volume ${volume} requires explicit --source and --ref`);
@@ -54,8 +59,8 @@ export async function buildHyreadToSimple({
   };
 
   const book = ANOTHER_DAYS_VOLUMES.has(volume)
-    ? await parseAnotherDaysEpubToBook(inputs.sourceImageEpubPath, { volume, creditOverrides })
-    : await parseHyreadEpubToBook(inputs.sourceImageEpubPath, { volume, creditOverrides });
+    ? await parseAnotherDaysEpubToBook(inputs.sourceImageEpubPath, { volume, creditOverrides, wording, onDiagnostic })
+    : await parseHyreadEpubToBook(inputs.sourceImageEpubPath, { volume, creditOverrides, wording, onDiagnostic });
   const sourceImages = book._sourceImages;
   delete book._sourceImages; // 内部字段，不传给渲染管线
 
@@ -67,6 +72,7 @@ export async function buildHyreadToSimple({
     volume,
     includeSpecials,
     creditOverrides,
+    onDiagnostic,
   });
 
   return result;
@@ -86,6 +92,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       'credit-name': { type: 'string', default: '嘻嘻嘻' },
       'credit-source': { type: 'string' },
       'credit-input': { type: 'string' },
+      wording: { type: 'string', default: 'taiwan' },
     },
     strict: true,
   });
@@ -101,6 +108,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     creditName: opts['credit-name'],
     creditSource: opts['credit-source'] || null,
     creditInput: opts['credit-input'] || null,
+    wording: opts.wording,
+    onDiagnostic: printConversionDiagnostic,
   });
 
   console.log(`完成: ${result.outEpubPath}`);

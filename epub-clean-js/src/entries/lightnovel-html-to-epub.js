@@ -3,6 +3,8 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 
 import { buildLightNovelEpub } from '../../books/yimei-seikatsu/lightnovel-html/index.js';
+import { validateWording } from '../../books/yimei-seikatsu/chinese-conversion.js';
+import { printConversionDiagnostic } from './conversion-diagnostics.js';
 
 const { values: opts } = parseArgs({
   options: {
@@ -17,9 +19,12 @@ const { values: opts } = parseArgs({
     'credit-source': { type: 'string' },
     'credit-input': { type: 'string' },
     ruby: { type: 'string', multiple: true },
+    wording: { type: 'string', default: 'taiwan' },
   },
   strict: true,
 });
+
+validateWording(opts.wording);
 
 for (const key of ['html', 'ref', 'out']) {
   if (!opts[key]) {
@@ -56,9 +61,11 @@ const result = await buildLightNovelEpub({
   imageRefEpubPath,
   outEpubPath,
   volume: opts.volume,
+  wording: opts.wording,
+  onDiagnostic: printConversionDiagnostic,
   includeSpecials: !opts['skip-specials'],
   creditOverrides,
-  ...(rubyAnnotations ? { rubyAnnotations } : {}),
+  ...(rubyAnnotations ? { rubyAnnotations, rubyAnnotationSource: 'explicit' } : {}),
 });
 
 console.log(`lightnovel-html-to-epub 完成: ${result.outEpubPath}`);

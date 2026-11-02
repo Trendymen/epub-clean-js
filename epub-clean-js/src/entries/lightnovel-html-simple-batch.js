@@ -6,6 +6,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { buildLightNovelEpub, buildLightNovelEpubFromBook } from '../../books/yimei-seikatsu/lightnovel-html/index.js';
 import { parseHyreadEpubToBook } from '../../books/yimei-seikatsu/hyread-parser.js';
 import { assertSourceFontsAvailable } from '../core/font-subset.js';
+import { validateWording } from '../../books/yimei-seikatsu/chinese-conversion.js';
+import { printConversionDiagnostic } from './conversion-diagnostics.js';
 
 export const defaultRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
@@ -115,7 +117,11 @@ function backupOutputs(outDir, volumes) {
   return count > 0 ? backupDir : null;
 }
 
-export async function runBatch({ root = defaultRoot, outDir = null, volumes = ['11', '12', '13'], creditName = '嘻嘻嘻', backup = true } = {}) {
+export async function runBatch({
+  root = defaultRoot, outDir = null, volumes = ['11', '12', '13'], creditName = '嘻嘻嘻', backup = true,
+  wording = 'taiwan', onDiagnostic,
+} = {}) {
+  validateWording(wording);
   const resolvedRoot = path.resolve(root);
   const resolvedOutDir = path.resolve(outDir || path.join(resolvedRoot, 'output/simple'));
   const creditOverrides = {
@@ -137,6 +143,9 @@ export async function runBatch({ root = defaultRoot, outDir = null, volumes = ['
       volume,
       creditOverrides,
       rubyAnnotations: rubyAnnotationsForVolume(volume),
+      rubyAnnotationSource: 'built-in',
+      wording,
+      onDiagnostic,
     };
 
     // 没有 HTML 时直接读取 HyRead EPUB。
@@ -150,7 +159,7 @@ export async function runBatch({ root = defaultRoot, outDir = null, volumes = ['
 
       let result;
       if (isHyreadDirect) {
-        const book = await parseHyreadEpubToBook(inputs.sourceImageEpubPath, { volume, creditOverrides });
+        const book = await parseHyreadEpubToBook(inputs.sourceImageEpubPath, { volume, creditOverrides, wording, onDiagnostic });
         const sourceImages = book._sourceImages;
         delete book._sourceImages;
         result = await buildLightNovelEpubFromBook(book, {
@@ -181,6 +190,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       volumes: { type: 'string', default: '11,12,13' },
       'credit-name': { type: 'string', default: '嘻嘻嘻' },
       'skip-backup': { type: 'boolean', default: false },
+      wording: { type: 'string', default: 'taiwan' },
     },
     strict: true,
   });
@@ -191,5 +201,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     volumes: opts.volumes.split(',').map((item) => item.trim()).filter(Boolean),
     creditName: opts['credit-name'],
     backup: !opts['skip-backup'],
+    wording: opts.wording,
+    onDiagnostic: printConversionDiagnostic,
   });
 }
