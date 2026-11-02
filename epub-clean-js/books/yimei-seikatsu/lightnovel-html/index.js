@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import * as OpenCC from 'opencc-js';
 import { parseHTML } from 'linkedom';
 
 import { readEpub, writeEpub } from '../../../src/core/zip-io.js';
@@ -11,8 +10,9 @@ import { buildSteraFootnote, normalizeFootnoteIds, selfCloseVoidTags } from '../
 import { validateOutput } from '../../../src/core/validator.js';
 import { MESSAGE_DISCLAIMER_LINES } from '../migrate/extras-cleaner.js';
 import { anotherDaysFixedFootnotesForChapter } from '../another-days-footnotes.js';
+import { simplifyText } from '../chinese-conversion.js';
 
-const toSimplified = OpenCC.Converter({ from: 'tw', to: 'cn' });
+export { simplifyText } from '../chinese-conversion.js';
 
 // 正文里台版译者直接塞进圆括号的内联注释，形如 （注：……）/（註：……）。
 // 渲染时把它们升级成 09 ln V8 多端兼容的可点击脚注（与特典同款 duokan-footnote）。
@@ -1181,10 +1181,6 @@ ${summaryGuide}${preGuide}
     <reference type="toc" title="目录" href="Text/TOC.xhtml"/>
   </guide>
 </package>`;
-}
-
-export function simplifyText(input) {
-  return toSimplified(String(input)).replace(/∼/g, '～');
 }
 
 export function extractArticleHtml(html) {
