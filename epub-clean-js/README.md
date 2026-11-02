@@ -80,6 +80,8 @@ node bin/cli.js migrate-translation \
 
 `--out` 可选：缺省时默认输出到 `<PROJECT_ROOT>/output/translated/[三河ごーすと].义妹生活.<volume>.[台简].epub`（由 `profile.paths.translatedDir` + `filePatterns.translated(volume)` 拼出）。需要落到其他位置传 `--out /your/path.epub` 覆盖即可。书名只带 `[台简]` 尾缀，与源文件靠目录区分（源在项目根，产物在 `output/translated/`）。
 
+09 卷日翻注音按已核对的段落对应关系迁移到台简，保留台简基字；两处平铺的 `你（anata）` 会把罗马字与日文读音一并放入 `<rt>`。原生 ruby 保留可迁移的标记和读音，输出使用 REF 样式，不移植源书的全局 CSS。无法可靠匹配或台简省略基字的来源可在 `<out>.align_report.md` 的“Ruby 迁移审计”中查看。遇到无法无损处理的注音结构时，命令会在覆盖已有 EPUB 和审计报告前报错。
+
 ### footnote-fix（通用注释升级）
 
 ```bash

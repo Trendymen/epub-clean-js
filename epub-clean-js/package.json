@@ -18,7 +18,7 @@
     "test": "node test/run-tests.mjs",
     "test:unit": "node test/run-tests.mjs unit",
     "test:e2e": "node test/run-tests.mjs e2e",
-    "test:portability": "node --test --test-reporter=spec test/unit/heal-inputs.test.js test/unit/heal-cli.test.js test/unit/module-paths.test.js test/unit/golden-manifest.test.js test/e2e/footnote-fix.e2e.test.js",
+    "test:portability": "node --test --test-reporter=spec test/unit/heal-inputs.test.js test/unit/heal-cli.test.js test/unit/module-paths.test.js test/unit/golden-manifest.test.js test/unit/yimei-seikatsu/ruby-migration.test.js test/unit/yimei-seikatsu/ruby-preservation.test.js test/unit/yimei-seikatsu/paragraph-extractor.test.js test/unit/yimei-seikatsu/footnote-extractor.test.js test/unit/yimei-seikatsu/inline-image-extractor.test.js test/e2e/footnote-fix.e2e.test.js",
     "test:hyread": "node --test --test-reporter=spec test/unit/hyread-session.test.js test/unit/hyread-browser.test.js test/unit/hyread-transfer.test.js test/unit/hyread-build.test.js test/unit/hyread-build-nav.test.js test/unit/hyread-verify.test.js test/e2e/hyread-workflow.e2e.test.js"
   },
   "dependencies": {

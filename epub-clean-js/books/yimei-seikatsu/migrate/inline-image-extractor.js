@@ -13,6 +13,7 @@
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { parseHTML } from 'linkedom';
+import { validateRubyDocument } from './paragraph-extractor.js';
 
 /**
  * @param {string} xhtmlPath
@@ -20,6 +21,7 @@ import { parseHTML } from 'linkedom';
  */
 export function extractInlineImages(xhtmlPath) {
   const xml = readFileSync(xhtmlPath, 'utf-8');
+  validateRubyDocument(xml, xhtmlPath);
   const { document } = parseHTML(xml);
 
   const images = [];

@@ -14,16 +14,20 @@
  */
 import { rm, mkdir, copyFile, readdir, readFile, writeFile, stat, mkdtemp } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join, basename } from 'node:path';
+import { dirname, join, basename, relative, sep, posix } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 
 import { parseHTML } from 'linkedom';
+import { XMLParser } from 'fast-xml-parser';
 
 import { applyToDir } from '../../../src/core/font-subset.js';
 import { readEpub } from '../../../src/core/zip-io.js';
+import { findFirst, findDirectChildren, getAttr } from '../../../src/core/opf.js';
 import { packEpub } from './epub-io.js';
-import { extractParagraphs } from './paragraph-extractor.js';
+import { extractParagraphs, extractParagraphData, validateRubyDocument } from './paragraph-extractor.js';
+import { planRubyMigration, renderAnnotatedParagraph, nativeRubyAnnotations, nativeSupAnnotations } from './ruby-migration.js';
+import { rubyOverrides09 } from './ruby-overrides-09.js';
 import { extractFootnotes } from './footnote-extractor.js';
 import { extractInlineImages } from './inline-image-extractor.js';
 import { alignParagraphs } from './aligner.js';
@@ -197,6 +201,112 @@ async function walkDir(dir) {
   return out;
 }
 
+const manifestParser = new XMLParser({
+  ignoreAttributes: false, attributeNamePrefix: '', preserveOrder: true,
+  parseAttributeValue: false, trimValues: false, removeNSPrefix: true,
+});
+
+function epubResourcePath(base, href, location) {
+  if (!href || /^[a-z][a-z\d+.-]*:/i.test(href) || href.startsWith('//')) {
+    throw new Error(`${location}: unsupported EPUB resource path (${href})`);
+  }
+  let decoded;
+  try { decoded = decodeURIComponent(href.split(/[?#]/, 1)[0]); }
+  catch { throw new Error(`${location}: invalid EPUB resource path (${href})`); }
+  if (!decoded || decoded.includes('\\') || decoded.includes('\0') || posix.isAbsolute(decoded) || /^[a-z]:/i.test(decoded)) {
+    throw new Error(`${location}: invalid EPUB resource path (${href})`);
+  }
+  const resolved = posix.normalize(posix.join(base, decoded));
+  if (resolved === '..' || resolved.startsWith('../')) {
+    throw new Error(`${location}: EPUB resource path escapes archive (${href})`);
+  }
+  return resolved;
+}
+
+async function xhtmlResources(root, label) {
+  const files = new Set((await walkDir(root))
+    .filter(file => /\.xhtml$/i.test(file))
+    .map(file => relative(root, file).split(sep).join('/')));
+  const container = manifestParser.parse(await readFile(join(root, 'META-INF', 'container.xml'), 'utf8'));
+  const rootfiles = findFirst(container, 'rootfiles');
+  if (!rootfiles) throw new Error(`${label}/META-INF/container.xml: missing rootfiles`);
+  const packages = findDirectChildren(rootfiles, 'rootfile');
+  if (!packages.length) throw new Error(`${label}/META-INF/container.xml: missing rootfile`);
+  for (const rootfile of packages) {
+    const opf = epubResourcePath('', getAttr(rootfile, 'full-path'), `${label}/META-INF/container.xml`);
+    const tree = manifestParser.parse(await readFile(join(root, ...opf.split('/')), 'utf8'));
+    const manifest = findFirst(tree, 'manifest');
+    if (!manifest) throw new Error(`${label}/${opf}: missing manifest`);
+    for (const item of findDirectChildren(manifest, 'item')) {
+      if ((getAttr(item, 'media-type') || '').toLowerCase() !== 'application/xhtml+xml') continue;
+      files.add(epubResourcePath(posix.dirname(opf), getAttr(item, 'href'), `${label}/${opf}`));
+    }
+  }
+  return files;
+}
+
+function migrationSpecials(profile, volume) {
+  return profile.specials?.[volume] ?? [
+    { id: 'special0001' }, { id: 'special0002' }, { id: 'special0003' },
+  ];
+}
+
+async function resolveDstFile(root, name) {
+  const paths = [join(root, 'OEBPS', name), join(root, name)];
+  for (const path of paths) if (await pathExists(path)) return path;
+  return paths[0];
+}
+
+function epubEntryName(root, file) {
+  return relative(root, file).split(sep).join('/');
+}
+
+async function validateInputRubies(srcUnpacked, dstUnpacked, profile, volume) {
+  const dstChapterFiles = new Set();
+  const dstSpecialFiles = new Set();
+  for (const [, files] of CHAPTER_MAP_09) {
+    for (const file of files) {
+      const selected = await resolveDstFile(dstUnpacked, file);
+      dstChapterFiles.add(epubEntryName(dstUnpacked, selected));
+    }
+  }
+  for (const special of migrationSpecials(profile, volume)) {
+    const selected = await resolveDstFile(dstUnpacked, `Text/${special.id}.xhtml`);
+    dstSpecialFiles.add(epubEntryName(dstUnpacked, selected));
+  }
+  for (const [label, root] of [['SRC', srcUnpacked], ['DST', dstUnpacked]]) {
+    for (const name of await xhtmlResources(root, label)) {
+      const supported = label === 'SRC' ? /^OEBPS\/Text\/chapter(?:[1-9]|1[0-2])\.xhtml$/.test(name)
+        : dstChapterFiles.has(name) || dstSpecialFiles.has(name);
+      const preserveNative = label === 'SRC' || dstSpecialFiles.has(name);
+      validateRubyDocument(await readFile(join(root, ...name.split('/')), 'utf8'), `${label}/${name}`, supported, { preserveNative, requireNamespace: true });
+    }
+  }
+}
+
+async function validateNativeRubyIds(buildDir) {
+  const textDir = join(buildDir, 'OEBPS', 'Text');
+  for (const file of await walkDir(textDir)) {
+    if (!/\.xhtml$/i.test(file)) continue;
+    const { document } = parseHTML(await readFile(file, 'utf8'));
+    const rubyIds = new Set();
+    for (const ruby of document.querySelectorAll('ruby')) {
+      for (const node of [ruby, ...ruby.querySelectorAll('[id]')]) {
+        if (node.hasAttribute('id')) rubyIds.add(node.getAttribute('id'));
+      }
+    }
+    if (!rubyIds.size) continue;
+    const counts = new Map();
+    for (const node of document.querySelectorAll('[id]')) {
+      const id = node.getAttribute('id');
+      counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+    for (const id of rubyIds) {
+      if (counts.get(id) > 1) throw new Error(`OUTPUT/Text/${relative(textDir, file).split(sep).join('/')}:ruby: duplicate-id (${id})`);
+    }
+  }
+}
+
 // ============================================================
 // Step 1: 搭 build 骨架
 // ============================================================
@@ -298,6 +408,7 @@ async function copyDstDecorationImages(dstUnpacked, imagesDir) {
 async function migrateChapters({ srcUnpacked, dstUnpacked, buildDir, profile, volume }) {
   const tocEntries = [];
   const reviewItems = [];
+  const rubyAudit = { records: [], diagnostics: [], nativeRecords: [], outputCount: 0 };
   const epigraph = profile.epigraphs?.[volume];
   const overrides = profile.footnoteOverrides?.[volume];
 
@@ -306,7 +417,11 @@ async function migrateChapters({ srcUnpacked, dstUnpacked, buildDir, profile, vo
 
     // SRC 段落
     const srcPath = join(srcUnpacked, 'OEBPS/Text', `chapter${srcChapterNum}.xhtml`);
-    let srcParas = extractParagraphs(srcPath);
+    const srcData = extractParagraphData(await readFile(srcPath, 'utf8'), { preserveMarkup: true });
+    let srcParas = srcData.paragraphs;
+    const srcLocation = `SRC/${epubEntryName(srcUnpacked, srcPath)}`;
+    let nativeAnnotations = nativeRubyAnnotations(srcData.rubies, srcLocation);
+    let nativeSupers = nativeSupAnnotations(srcData.supers, srcLocation);
 
     // 9h-1 chapter1 引言剥离：若 SRC 第 1 段就是 profile.epigraphs[volume]，从正文跳过
     // （chapter-renderer 已内置 epigraph 剥离逻辑，但只在 chapterNumber===1 时生效；
@@ -315,23 +430,28 @@ async function migrateChapters({ srcUnpacked, dstUnpacked, buildDir, profile, vo
       srcChapterNum === 1 && epigraph &&
       srcParas.length > 0 && srcParas[0].startsWith(epigraph.substring(0, 10))
     ) {
+      if (nativeAnnotations.some(annotation => annotation.paraIndex === 0)) throw new Error(`${srcPath}:p1:ruby: unsupported-ruby-in-epigraph`);
+      if (nativeSupers.some(annotation => annotation.paraIndex === 0)) throw new Error(`${srcPath}:p1:sup: unsupported-sup-in-epigraph`);
       srcParas = srcParas.slice(1);
+      nativeAnnotations = nativeAnnotations.map(annotation => ({ ...annotation, paraIndex: annotation.paraIndex - 1 }));
+      nativeSupers = nativeSupers.map(annotation => ({ ...annotation, paraIndex: annotation.paraIndex - 1 }));
     }
+    rubyAudit.nativeRecords.push(...nativeAnnotations.map(annotation => ({ ...annotation, status: 'preserved' })));
 
     // 合并 DST split
     const dstParas = [];
     const allNotes = [];
     const allInlineImgs = [];
+    const allRubies = [];
     for (const f of dstFiles) {
-      const dstFilePath = join(dstUnpacked, 'OEBPS', f);
-      const dstFilePathAlt = join(dstUnpacked, f);
-      const actual = (await pathExists(dstFilePath)) ? dstFilePath : dstFilePathAlt;
-      const fileParas = extractParagraphs(actual);
+      const actual = await resolveDstFile(dstUnpacked, f);
+      const { paragraphs: fileParas, rubies: fileRubies } = extractParagraphData(await readFile(actual, 'utf8'));
       const fileNotes = extractFootnotes(actual);
       const fileImgs = extractInlineImages(actual);
       const offset = dstParas.length;
       for (const n of fileNotes) n.hostParaIndex += offset;
       for (const im of fileImgs) im.afterParaIndex += offset;
+      allRubies.push(...fileRubies.map(ruby => ({ ...ruby, fileParaIndex: ruby.paraIndex, paraIndex: ruby.paraIndex + offset, archive: 'DST', file: epubEntryName(dstUnpacked, actual) })));
       dstParas.push(...fileParas);
       allNotes.push(...fileNotes);
       allInlineImgs.push(...fileImgs);
@@ -339,9 +459,17 @@ async function migrateChapters({ srcUnpacked, dstUnpacked, buildDir, profile, vo
 
     // 段落对齐
     const pairs = alignParagraphs(srcParas, dstParas);
+    const rubyPlan = planRubyMigration({
+      chapter: chapterKey, sourceParagraphs: dstParas,
+      rubies: allRubies.map(ruby => ({ ...ruby, alignedTargetParaIndices: pairs.filter(([s, d]) => s !== null && d === ruby.paraIndex).map(([s]) => s) })),
+      targetParagraphs: srcParas, rules: volume === '09' ? rubyOverrides09[chapterKey] : [],
+    });
+    rubyAudit.records.push(...rubyPlan.records);
+    rubyAudit.diagnostics.push(...rubyPlan.diagnostics);
 
     // 定位注释 + sup 注入（含 9g override 接入）
     const outParas = [...srcParas];
+    const paraToSup = new Map();
     /** @type {Map<number, string[]>} */
     const paraToAsides = new Map();
     let newIdNum = 0;
@@ -367,8 +495,8 @@ async function migrateChapters({ srcUnpacked, dstUnpacked, buildDir, profile, vo
       }
 
       const [supHtml, asideHtml] = buildSteraFootnote(fn, newIdNum);
-      const p = outParas[srcIdx];
-      outParas[srcIdx] = p.substring(0, charOff) + supHtml + p.substring(charOff);
+      if (!paraToSup.has(srcIdx)) paraToSup.set(srcIdx, []);
+      paraToSup.get(srcIdx).push({ offset: charOff, html: supHtml });
       if (!paraToAsides.has(srcIdx)) paraToAsides.set(srcIdx, []);
       paraToAsides.get(srcIdx).push(asideHtml);
 
@@ -381,6 +509,19 @@ async function migrateChapters({ srcUnpacked, dstUnpacked, buildDir, profile, vo
         srcTarget: outParas[srcIdx].substring(0, 80),
         noteText: fn.text,
       });
+    }
+
+    for (let i = 0; i < srcParas.length; i++) {
+      const annotations = [...rubyPlan.annotations, ...nativeAnnotations].filter(annotation => annotation.paraIndex === i);
+      const rendered = renderAnnotatedParagraph(srcParas[i], annotations, paraToSup.get(i), nativeSupers.filter(sup => sup.paraIndex === i));
+      outParas[i] = rendered.html;
+      rubyAudit.outputCount += annotations.length - rendered.rejected.length;
+      for (const record of rubyPlan.records) {
+        if (rendered.rejected.includes(record.target?.id)) {
+          record.status = 'unresolved';
+          record.reason = rendered.reasons[record.target.id];
+        }
+      }
     }
 
     // 章内插图：DST after_para_index 映射到 SRC idx
@@ -428,10 +569,7 @@ async function migrateChapters({ srcUnpacked, dstUnpacked, buildDir, profile, vo
     }
 
     // 标题
-    const dstFile0Path = await firstExisting([
-      join(dstUnpacked, 'OEBPS', dstFiles[0]),
-      join(dstUnpacked, dstFiles[0]),
-    ]);
+    const dstFile0Path = await resolveDstFile(dstUnpacked, dstFiles[0]);
     const title = extractH3Title(dstFile0Path);
 
     // 9h-2：传 chapterNumber + epigraph 给 chapter-renderer（chapter1 时它会再判定一次剥离）
@@ -448,38 +586,33 @@ async function migrateChapters({ srcUnpacked, dstUnpacked, buildDir, profile, vo
       `${allNotes.length} 注释 / ${allInlineImgs.length} 插图`,
     );
   }
-  return { tocEntries, reviewItems };
-}
-
-async function firstExisting(paths) {
-  for (const p of paths) if (await pathExists(p)) return p;
-  return paths[0];
+  return { tocEntries, reviewItems, rubyAudit };
 }
 
 // ============================================================
 // Step 3 (9i)：特典 special0001-0003 走 chapter-renderer
 // ============================================================
 
-async function migrateSpecials({ dstUnpacked, buildDir, profile, volume }) {
+async function migrateSpecials({ dstUnpacked, buildDir, profile, volume, rubyAudit }) {
   const tocEntries = [];
   const reviewItems = [];
-  const specials = profile.specials?.[volume] ?? [
-    { id: 'special0001' }, { id: 'special0002' }, { id: 'special0003' },
-  ];
+  const specials = migrationSpecials(profile, volume);
 
   for (const spec of specials) {
     const name = `${spec.id}.xhtml`;
-    const dstPath = await firstExisting([
-      join(dstUnpacked, 'OEBPS', 'Text', name),
-      join(dstUnpacked, 'Text', name),
-    ]);
+    const dstPath = await resolveDstFile(dstUnpacked, `Text/${name}`);
     if (!(await pathExists(dstPath))) continue;
 
-    const dstParas = extractParagraphs(dstPath);
+    const { paragraphs: dstParas, rubies, supers } = extractParagraphData(await readFile(dstPath, 'utf8'), { preserveMarkup: true });
+    const dstLocation = `DST/${epubEntryName(dstUnpacked, dstPath)}`;
+    const nativeAnnotations = nativeRubyAnnotations(rubies, dstLocation);
+    const nativeSupers = nativeSupAnnotations(supers, dstLocation);
+    rubyAudit.nativeRecords.push(...nativeAnnotations.map(annotation => ({ ...annotation, status: 'preserved' })));
     const notes = extractFootnotes(dstPath);
     const inlineImgs = extractInlineImages(dstPath);
 
     const outParas = [...dstParas];
+    const paraToSup = new Map();
     /** @type {Map<number, string[]>} */
     const paraToAsides = new Map();
     let newIdNum = 0;
@@ -488,8 +621,8 @@ async function migrateSpecials({ dstUnpacked, buildDir, profile, volume }) {
       const [supHtml, asideHtml] = buildSteraFootnote(fn, newIdNum);
       const idx = fn.hostParaIndex;
       if (idx >= 0 && idx < outParas.length) {
-        const off = Math.min(fn.supOffset, outParas[idx].length);
-        outParas[idx] = outParas[idx].substring(0, off) + supHtml + outParas[idx].substring(off);
+        if (!paraToSup.has(idx)) paraToSup.set(idx, []);
+        paraToSup.get(idx).push({ offset: fn.supOffset, html: supHtml });
         if (!paraToAsides.has(idx)) paraToAsides.set(idx, []);
         paraToAsides.get(idx).push(asideHtml);
       }
@@ -502,6 +635,12 @@ async function migrateSpecials({ dstUnpacked, buildDir, profile, volume }) {
         srcTarget: (idx >= 0 && idx < outParas.length) ? outParas[idx].substring(0, 80) : '',
         noteText: fn.text,
       });
+    }
+
+    for (let i = 0; i < dstParas.length; i++) {
+      const annotations = nativeAnnotations.filter(annotation => annotation.paraIndex === i);
+      outParas[i] = renderAnnotatedParagraph(dstParas[i], annotations, paraToSup.get(i), nativeSupers.filter(sup => sup.paraIndex === i)).html;
+      rubyAudit.outputCount += annotations.length;
     }
 
     /** @type {Map<number, string[]>} */
@@ -756,7 +895,7 @@ function buildSpine() {
 // Step 6: 写审计报告
 // ============================================================
 
-async function writeAlignReport(reviewItems, reportPath) {
+async function writeAlignReport(reviewItems, reportPath, rubyAudit) {
   const lines = [
     '# 注释定位与对齐审计报告\n',
     `共 ${reviewItems.length} 条（注释 + 内联插图），按 chapter+confidence 列出：\n`,
@@ -775,6 +914,11 @@ async function writeAlignReport(reviewItems, reportPath) {
     lines.push(`- **SRC 插入处** (前 80 字): \`${it.srcTarget}\``);
     lines.push('');
   }
+  lines.push('<!-- ruby-audit -->', '## Ruby 迁移审计', '');
+  lines.push(`迁移来源 ${rubyAudit.records.length} 条，另保留原生注音 ${rubyAudit.nativeRecords.length} 条，输出 ${rubyAudit.outputCount} 处 ruby；未解决 ${rubyAudit.records.filter(record => record.status === 'unresolved').length} 条。`);
+  lines.push('迁移来源的 source.archive 标记输入 EPUB，source.file 是 ZIP 内的实际路径；原生注音的 location 以 SRC 或 DST 标记输入，并给出 ZIP 路径、段落和 ruby 序号。target 使用去除题记后的台简段落索引与原文字符偏移。合并来源共享同一 target.id。', '');
+  lines.push('原生 ruby 保留可迁移的标记和读音；输出使用 REF 样式，不移植源书的全局 CSS。', '');
+  lines.push('```json', JSON.stringify(rubyAudit, null, 2), '```', '');
   await writeFile(reportPath, lines.join('\n'), 'utf-8');
 }
 
@@ -806,6 +950,8 @@ export default async function migrate({ srcEpub, dstEpub, refEpub, outEpub, volu
       unpackEpubTo(refEpub, refUnpacked),
     ]);
 
+    await validateInputRubies(srcUnpacked, dstUnpacked, profile, volume);
+
     console.log('=== Step 1: 搭 build 骨架（REF CSS + Fonts + 图片） ===');
     await setupBuildDir({ refUnpacked, dstUnpacked, srcUnpacked, buildDir });
 
@@ -813,25 +959,26 @@ export default async function migrate({ srcEpub, dstEpub, refEpub, outEpub, volu
     await writeAttachedPages({ buildDir, volume });
 
     console.log('=== Step 3: 迁移 12 个正文章节 ===');
-    const { tocEntries: chapterToc, reviewItems } = await migrateChapters({
+    const { tocEntries: chapterToc, reviewItems, rubyAudit } = await migrateChapters({
       srcUnpacked, dstUnpacked, buildDir, profile, volume,
     });
 
     console.log('=== Step 4: 迁移特典（special0001-0003） ===');
     const { tocEntries: specialToc, reviewItems: specialReviews } = await migrateSpecials({
-      dstUnpacked, buildDir, profile, volume,
+      dstUnpacked, buildDir, profile, volume, rubyAudit,
     });
     reviewItems.push(...specialReviews);
 
     console.log('=== Step 5: 写元数据 + TOC ===');
     await writeMetadataAndToc({ buildDir, chapterToc, specialToc });
+    if (rubyAudit.nativeRecords.length) await validateNativeRubyIds(buildDir);
 
     console.log('=== Step 6: 打包 EPUB ===');
     await packEpub(buildDir, outEpub);
     console.log(`输出: ${outEpub}`);
 
     console.log('=== Step 7: 写审计报告 ===');
-    await writeAlignReport(reviewItems, reportPath);
+    await writeAlignReport(reviewItems, reportPath, rubyAudit);
     console.log(`已写入 ${reportPath}`);
   } finally {
     // 临时目录保留以便排查（不删）；如需清理可手工删 workRoot

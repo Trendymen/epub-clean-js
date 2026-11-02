@@ -22,10 +22,11 @@
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { parseHTML } from 'linkedom';
+import { duokanFootnoteAnchors, isDuokanFootnoteSup, validateRubyDocument } from './paragraph-extractor.js';
 
 const CTX_RADIUS = 30;
 
-const SKIP_SUBTREE_TAGS = new Set(['RT', 'RP', 'SUP', 'ASIDE']);
+const SKIP_SUBTREE_TAGS = new Set(['RT', 'RP', 'ASIDE']);
 
 /**
  * @param {string} xhtmlPath
@@ -42,6 +43,7 @@ const SKIP_SUBTREE_TAGS = new Set(['RT', 'RP', 'SUP', 'ASIDE']);
  */
 export function extractFootnotes(xhtmlPath) {
   const xml = readFileSync(xhtmlPath, 'utf-8');
+  validateRubyDocument(xml, xhtmlPath);
   const { document } = parseHTML(xml);
 
   // 跳过 aside 内的 <p>（与 paragraph-extractor 索引体系一致；注释正文不计入 hostParaIndex）。
@@ -54,10 +56,8 @@ export function extractFootnotes(xhtmlPath) {
 
   const notes = [];
   for (const sup of document.querySelectorAll('sup')) {
-    const a = sup.querySelector('a');
+    const [a] = duokanFootnoteAnchors(sup);
     if (!a) continue;
-    const cls = a.getAttribute('class') || '';
-    if (!cls.split(/\s+/).includes('duokan-footnote')) continue;
     const img = a.querySelector('img');
     if (!img) continue;
 
@@ -98,7 +98,7 @@ export function extractFootnotes(xhtmlPath) {
  * 计算 (段落纯文本, sup 在文本中的字符偏移)。
  *
  * 采用 DOM TreeWalker 等价的递归遍历：
- * - 跳过 rt/rp/sup/aside 子树（这些子树内的所有文本都不算）
+ * - 跳过 rt/rp/aside 和多看脚注子树
  * - sup 子树根的 tail（即 sup 之后的文本）要算
  * - p_elem 自身的 tail 不算（不属于段落主文本）
  *
@@ -111,15 +111,14 @@ function textAndSupOffset(pElem, supElem) {
 
   walk(pElem, supElem, parts, offsetRef, /*skipDepth*/ 0);
 
-  return {
-    text: parts.join(''),
-    supOffset: Math.max(offsetRef.value, 0),
-  };
+  const raw = parts.join('');
+  const leading = raw.length - raw.trimStart().length;
+  return { text: raw.trim(), supOffset: Math.max(offsetRef.value - leading, 0) };
 }
 
 /**
  * 递归遍历 elem 的所有子节点。
- * skipDepth>0 时表示在跳过子树内（rt/rp/sup/aside），所有 text 都不计。
+ * skipDepth>0 时表示在跳过 rt、rp、aside 或多看脚注子树。
  */
 function walk(elem, supElem, parts, offsetRef, skipDepth) {
   // 节点类型常量：1 = ELEMENT_NODE, 3 = TEXT_NODE
@@ -133,7 +132,7 @@ function walk(elem, supElem, parts, offsetRef, skipDepth) {
     } else if (child.nodeType === 1) {
       // 元素节点
       const tag = child.tagName;
-      const isSkipRoot = SKIP_SUBTREE_TAGS.has(tag);
+      const isSkipRoot = SKIP_SUBTREE_TAGS.has(tag) || (tag === 'SUP' && isDuokanFootnoteSup(child));
 
       // start 事件：在进入子节点前，先检查是否目标 sup
       if (child === supElem && skipDepth === 0) {
